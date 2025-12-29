@@ -18,7 +18,6 @@ requirements = [
     "django-environ",
     "django-filter",
     "jsonschema",
-    "pinelabs==2.0.0",
 ]
 
 test_requirements = []
