@@ -1,10 +1,15 @@
 from rest_framework.routers import DefaultRouter
 
+from care_pinelabs.api.viewsets.gateway import GatewayViewSet
 from care_pinelabs.api.viewsets.health_check import HealthCheckViewSet
-
+from care_pinelabs.api.viewsets.pinelabs_terminal import PinelabsTerminalViewSet
 
 router = DefaultRouter()
 
 router.register("health_check", HealthCheckViewSet, basename="pinelabs__health_check")
+router.register(
+    "pinelabs_terminal", PinelabsTerminalViewSet, basename="pinelabs__pinelabs_terminal"
+)
+router.register("gateway", GatewayViewSet, basename="pinelabs__gateway")
 
 urlpatterns = router.urls

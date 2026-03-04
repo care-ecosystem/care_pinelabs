@@ -98,15 +98,15 @@ class PluginSettings:  # pragma: no cover
 
 
 REQUIRED_SETTINGS = {
-    "PINELABS_KEY_ID",
-    "PINELABS_KEY_SECRET",
-    "PINELABS_WEBHOOK_SECRET",
+    "PINELABS_MERCHANT_ID",
+    "PINELABS_SECURITY_TOKEN",
 }
 
 DEFAULTS = {
-    "PINELABS_KEY_ID": "",
-    "PINELABS_KEY_SECRET": "",
-    "PINELABS_WEBHOOK_SECRET": "",
+    "PINELABS_MERCHANT_ID": "",
+    "PINELABS_SECURITY_TOKEN": "",
+    "PINELABS_API_BASE_URL": "https://www.plutuscloudserviceuat.in:8201",
+    "PINELABS_API_TIMEOUT": 30,
 }
 
 plugin_settings = PluginSettings(
