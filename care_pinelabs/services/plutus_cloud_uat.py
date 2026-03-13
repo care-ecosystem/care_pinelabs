@@ -74,7 +74,7 @@ class PlutusCloudUATService:
     def cancel_transaction(
         self, data: CancelTransactionRequestData
     ) -> CancelTransactionResponseData:
-        url = f"{self.base_endpoint}/CancelTransaction"
+        url = f"{self.base_endpoint}/CancelTransactionForced"
         payload = {
             "MerchantID": plugin_settings.PINELABS_MERCHANT_ID,
             "SecurityToken": plugin_settings.PINELABS_SECURITY_TOKEN,
@@ -82,6 +82,8 @@ class PlutusCloudUATService:
             "Storeid": data.store_id,
             "PlutusTransactionReferenceID": data.plutus_transaction_reference_id,
             "Amount": data.amount,
+            "TakeToHomeScreen": True,
+            "ConfirmationRequired": False,
         }
 
         response = requests.post(
