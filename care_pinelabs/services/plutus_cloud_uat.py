@@ -14,7 +14,7 @@ from care_pinelabs.settings import plugin_settings
 class PlutusCloudUATService:
     def __init__(self):
         self.base_endpoint = (
-            plugin_settings.PINELABS_API_BASE_URL + "/API/CloudBasedIntegration/V1"
+            plugin_settings.PINELABS_API_BASE_URL + "/api/CloudBasedIntegration/V1"
         )
 
     def upload_transaction(
