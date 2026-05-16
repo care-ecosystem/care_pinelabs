@@ -105,8 +105,11 @@ REQUIRED_SETTINGS = {
 DEFAULTS = {
     "PINELABS_MERCHANT_ID": "",
     "PINELABS_SECURITY_TOKEN": "",
-    "PINELABS_API_BASE_URL": "https://www.plutuscloudserviceuat.in:8201",
+    "PINELABS_API_BASE_URL": "https://instore-ism.uat.pinelabs.com",
     "PINELABS_API_TIMEOUT": 30,
+    "PINELABS_AUTO_CANCEL_DURATION_MINUTES": 5,
+    "PINELABS_POLL_INTERVAL_SECONDS": 5,
+    "PINELABS_POLL_BUFFER_SECONDS": 60,
 }
 
 plugin_settings = PluginSettings(

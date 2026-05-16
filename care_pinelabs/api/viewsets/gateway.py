@@ -1,6 +1,7 @@
 import logging
 from uuid import uuid4
 
+from django.db import transaction
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
@@ -8,17 +9,35 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
-from care_pinelabs.api.serializers.gateway import (
-    CancelTransactionSerializer,
-    TransactionStatusSerializer,
-    UploadTransactionSerializer,
+from care.emr.models.payment_reconciliation import PaymentReconciliation
+from care.emr.resources.payment_reconciliation.spec import (
+    PaymentReconciliationReadSpec,
+    PaymentReconciliationStatusOptions,
 )
-from care_pinelabs.care_pinelabs.services.specs.plutus_cloud_uat import (
+from care.utils.shortcuts import get_object_or_404
+from care_pinelabs.api.exceptions import pinelabs_exception_handler
+from care_pinelabs.api.specs.gateway import (
+    CancelTransactionSpec,
+    TransactionStatusSpec,
+    UploadTransactionSpec,
+)
+from care_pinelabs.models.pinelabs_terminal import PinelabsTerminal
+from care_pinelabs.services.payment_reconciliation import (
+    PINELABS_META_KEY,
+    PLUTUS_RESPONSE_CODE_APPROVED,
+    build_cancel_meta,
+    build_upload_meta,
+    cancel_payment_reconciliation,
+    create_payment_reconciliation,
+    rupees_to_paise,
+)
+from care_pinelabs.services.plutus_cloud import PlutusCloudService
+from care_pinelabs.services.specs.plutus_cloud import (
     CancelTransactionRequestData,
-    GetStatusRequestData,
     UploadTransactionRequestData,
 )
-from care_pinelabs.services.plutus_cloud_uat import PlutusCloudUATService
+from care_pinelabs.settings import plugin_settings
+from care_pinelabs.tasks.poll_transaction_status import poll_pinelabs_transaction_status
 
 logger = logging.getLogger(__name__)
 
@@ -27,86 +46,148 @@ logger = logging.getLogger(__name__)
 class GatewayViewSet(GenericViewSet):
     permission_classes = (IsAuthenticated,)
 
-    serializer_action_classes = {
-        "upload_transaction": UploadTransactionSerializer,
-        "transaction_status": TransactionStatusSerializer,
-        "cancel_transaction": CancelTransactionSerializer,
-    }
+    def get_exception_handler(self):
+        return pinelabs_exception_handler
 
-    def get_serializer_class(self):
-        if self.action in self.serializer_action_classes:
-            return self.serializer_action_classes[self.action]
+    def _get_terminal(self, external_id) -> PinelabsTerminal:
+        return get_object_or_404(PinelabsTerminal, external_id=external_id)
 
-        return super().get_serializer_class()
+    def _get_reconciliation(self, external_id) -> PaymentReconciliation:
+        return get_object_or_404(PaymentReconciliation, external_id=external_id)
 
-    def validate_request(self, request):
-        serializer = self.get_serializer(data=request.data)
+    @staticmethod
+    def _serialize_reconciliation(instance: PaymentReconciliation) -> dict:
+        return PaymentReconciliationReadSpec.serialize(instance).to_json()
 
-        try:
-            serializer.is_valid(raise_exception=True)
-        except Exception as exception:
-            warning_string = (
-                f"Validation failed for request data: {request.data}, "
-                f"Path: {request.path}, Method: {request.method}, "
-                f"Error details: {exception!s}"
-            )
-            logger.info(warning_string)
-
-            raise exception
-
-        return serializer.validated_data
-
+    @extend_schema(request=UploadTransactionSpec)
     @action(detail=False, methods=["POST"])
     def upload_transaction(self, request):
-        validated_data = self.validate_request(request)
+        request_data = UploadTransactionSpec.model_validate(request.data)
+        terminal = self._get_terminal(request_data.terminal)
+        user = request.user
 
-        request_data = UploadTransactionRequestData(
-            transaction_number=str(uuid4()),
-            sequence_number=1,
-            allowed_payment_mode=validated_data["payment_mode"],
-            amount=validated_data["amount"],
-            user_id=None,
-            client_id=validated_data["terminal"].client_id,
-            store_id=validated_data["terminal"].store_id,
+        transaction_number = str(uuid4())
+        plutus_response = PlutusCloudService().upload_transaction(
+            UploadTransactionRequestData(
+                transaction_number=transaction_number,
+                sequence_number=1,
+                allowed_payment_mode=request_data.payment_mode,
+                amount=rupees_to_paise(request_data.amount),
+                user_id=user.username,
+                client_id=terminal.client_id,
+                store_id=terminal.store_id,
+                auto_cancel_duration_in_minutes=plugin_settings.PINELABS_AUTO_CANCEL_DURATION_MINUTES,
+            )
         )
-        response = PlutusCloudUATService().upload_transaction(request_data)
+
+        if (
+            plutus_response.response_code != PLUTUS_RESPONSE_CODE_APPROVED
+            or plutus_response.transaction_reference_id is None
+        ):
+            logger.warning(
+                "Pinelabs upload_transaction failed: code=%s message=%s",
+                plutus_response.response_code,
+                plutus_response.response_message,
+            )
+            return Response(
+                {
+                    "errors": [
+                        {
+                            "type": "pinelabs_upload_failed",
+                            "msg": plutus_response.response_message,
+                            "code": plutus_response.response_code,
+                        }
+                    ]
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        reconciliation = create_payment_reconciliation(
+            request_data,
+            facility=terminal.facility,
+            user=user,
+            meta=build_upload_meta(
+                terminal=terminal,
+                transaction_number=transaction_number,
+                payment_mode=request_data.payment_mode.value,
+                response=plutus_response,
+            ),
+        )
+        transaction.on_commit(
+            lambda: poll_pinelabs_transaction_status.delay(
+                payment_reconciliation_id=reconciliation.id
+            )
+        )
 
         return Response(
-            status=status.HTTP_200_OK,
-            data=response.model_dump(),
+            self._serialize_reconciliation(reconciliation),
+            status=status.HTTP_201_CREATED,
         )
 
+    @extend_schema(request=TransactionStatusSpec)
     @action(detail=False, methods=["POST"])
     def transaction_status(self, request):
-        validated_data = self.validate_request(request)
+        request_data = TransactionStatusSpec.model_validate(request.data)
+        reconciliation = self._get_reconciliation(request_data.payment_reconciliation)
 
-        request_data = GetStatusRequestData(
-            plutus_transaction_reference_id=validated_data["transaction_reference_id"],
-            client_id=validated_data["terminal"].client_id,
-            store_id=validated_data["terminal"].store_id,
-        )
-        response = PlutusCloudUATService().get_status(request_data)
+        return Response(self._serialize_reconciliation(reconciliation))
 
-        # TODO: create payment reconciliation here
-
-        return Response(
-            status=status.HTTP_200_OK,
-            data=response.model_dump(),
-        )
-
+    @extend_schema(request=CancelTransactionSpec)
     @action(detail=False, methods=["POST"])
     def cancel_transaction(self, request):
-        validated_data = self.validate_request(request)
+        request_data = CancelTransactionSpec.model_validate(request.data)
+        reconciliation = self._get_reconciliation(request_data.payment_reconciliation)
 
-        request_data = CancelTransactionRequestData(
-            plutus_transaction_reference_id=validated_data["transaction_reference_id"],
-            client_id=validated_data["terminal"].client_id,
-            store_id=validated_data["terminal"].store_id,
-            amount=validated_data["amount"],
-        )
-        response = PlutusCloudUATService().cancel_transaction(request_data)
+        pinelabs_meta = (reconciliation.meta or {}).get(PINELABS_META_KEY, {})
+        terminal_external_id = pinelabs_meta.get("terminal_id")
+        transaction_reference_id = pinelabs_meta.get("transaction_reference_id")
+        if not terminal_external_id or transaction_reference_id is None:
+            return Response(
+                {
+                    "errors": [
+                        {
+                            "type": "pinelabs_metadata_missing",
+                            "msg": "PaymentReconciliation has no pinelabs metadata",
+                        }
+                    ]
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        terminal = self._get_terminal(terminal_external_id)
 
-        return Response(
-            status=status.HTTP_200_OK,
-            data=response.model_dump(),
+        plutus_response = PlutusCloudService().cancel_transaction(
+            CancelTransactionRequestData(
+                plutus_transaction_reference_id=str(transaction_reference_id),
+                client_id=terminal.client_id,
+                store_id=terminal.store_id,
+                amount=rupees_to_paise(reconciliation.amount),
+            )
         )
+
+        if plutus_response.response_code != PLUTUS_RESPONSE_CODE_APPROVED:
+            logger.warning(
+                "Pinelabs cancel_transaction failed: code=%s message=%s",
+                plutus_response.response_code,
+                plutus_response.response_message,
+            )
+            return Response(
+                {
+                    "errors": [
+                        {
+                            "type": "pinelabs_cancel_failed",
+                            "msg": plutus_response.response_message,
+                            "code": plutus_response.response_code,
+                        }
+                    ]
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        reconciliation = cancel_payment_reconciliation(
+            reconciliation,
+            user=request.user,
+            status=PaymentReconciliationStatusOptions.cancelled,
+            meta=build_cancel_meta(reconciliation.meta or {}, plutus_response),
+        )
+
+        return Response(self._serialize_reconciliation(reconciliation))
