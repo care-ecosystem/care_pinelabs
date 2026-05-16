@@ -31,6 +31,7 @@ PINELABS_META_KEY = "pinelabs"
 
 PLUTUS_RESPONSE_CODE_APPROVED = 0
 PLUTUS_RESPONSE_CODE_VOIDED = 1008
+PLUTUS_RESPONSE_CODE_UPLOADED = 1001
 
 PAISE_PER_RUPEE = 100
 
@@ -98,8 +99,10 @@ def resolve_status_outcome(
     """Map a Plutus status response to a (status, outcome) tuple.
 
     Treats the response as terminal only when Plutus returns the well-known
-    APPROVED (``0``) or VOIDED (``1008``) codes. Every other non-zero code is
-    treated as transient so the caller can keep polling.
+    APPROVED (`0`) or UPLOADED (`1001`) codes.
+        - APPROVED code indicates that the transaction was approved and the funds were transferred.
+        - UPLOADED code indicates that the transaction was uploaded to the Plutus system and is pending approval.
+        - Every other non-zero code is treated as error.
     """
     code = response.response_code
     if code == PLUTUS_RESPONSE_CODE_APPROVED:
@@ -107,14 +110,15 @@ def resolve_status_outcome(
             PaymentReconciliationStatusOptions.active,
             PaymentReconciliationOutcomeOptions.complete,
         )
-    if code == PLUTUS_RESPONSE_CODE_VOIDED:
+    if code == PLUTUS_RESPONSE_CODE_UPLOADED:
         return (
-            PaymentReconciliationStatusOptions.cancelled,
-            PaymentReconciliationOutcomeOptions.error,
+            PaymentReconciliationStatusOptions.draft,
+            PaymentReconciliationOutcomeOptions.queued,
         )
+
     return (
-        PaymentReconciliationStatusOptions.draft,
-        PaymentReconciliationOutcomeOptions.queued,
+        PaymentReconciliationStatusOptions.cancelled,
+        PaymentReconciliationOutcomeOptions.error,
     )
 
 
