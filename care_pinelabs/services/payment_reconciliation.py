@@ -234,3 +234,66 @@ def cancel_payment_reconciliation(
     instance.save()
     rebalance_account_task(instance.account_id)
     return instance
+
+
+def authorize_payment_reconciliation_refresh(
+    instance: PaymentReconciliation, user
+) -> None:
+    """Check if user has permission to refresh payment reconciliation status."""
+    if not AuthorizationController.call(
+        "can_write_payment_reconciliation_in_facility", user, instance.facility
+    ):
+        raise PermissionDenied("Cannot update payment reconciliation status")
+
+
+def refresh_payment_reconciliation_status(
+    instance: PaymentReconciliation,
+    *,
+    user,
+) -> tuple[PaymentReconciliation, bool]:
+    """
+    Refresh payment reconciliation status from Pine Labs.
+
+    Returns tuple of (reconciliation, already_updated)
+    where already_updated is True if status was unchanged.
+    """
+    from care_pinelabs.models.pinelabs_terminal import PinelabsTerminal
+    from care_pinelabs.services.plutus_cloud import PlutusCloudService
+    from care_pinelabs.services.specs.plutus_cloud import GetStatusRequestData
+
+    # 1. Authorize
+    authorize_payment_reconciliation_refresh(instance, user)
+
+    # 2. Extract Pine Labs metadata
+    pinelabs_meta = (instance.meta or {}).get(PINELABS_META_KEY, {})
+    terminal_external_id = pinelabs_meta.get("terminal_id")
+    transaction_reference_id = pinelabs_meta.get("transaction_reference_id")
+
+    if not terminal_external_id or transaction_reference_id is None:
+        raise ValidationError("PaymentReconciliation has no pinelabs metadata")
+
+    # 3. Get terminal configuration
+    terminal = get_object_or_404(PinelabsTerminal, external_id=terminal_external_id)
+
+    # 4. Call Pine Labs GetStatus API
+    plutus_response = PlutusCloudService().get_status(
+        GetStatusRequestData(
+            plutus_transaction_reference_id=str(transaction_reference_id),
+            client_id=terminal.client_id,
+            store_id=terminal.store_id,
+        )
+    )
+
+    # 5. Check if status has changed
+    instance.refresh_from_db()
+    current_pinelabs_meta = (instance.meta or {}).get(PINELABS_META_KEY, {})
+    current_status_meta = current_pinelabs_meta.get("status", {})
+    current_response_code = current_status_meta.get("response_code")
+
+    already_updated = current_response_code == plutus_response.response_code
+
+    # 6. Apply status to reconciliation only if changed
+    if not already_updated:
+        apply_status_to_reconciliation(instance, plutus_response)
+
+    return instance, already_updated
