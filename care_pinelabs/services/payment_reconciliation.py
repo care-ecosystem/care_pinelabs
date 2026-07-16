@@ -20,6 +20,7 @@ from care.facility.models.facility import Facility
 from care.security.authorization.base import AuthorizationController
 from care.utils.shortcuts import get_object_or_404
 from care.utils.time_util import care_now
+from care_pinelabs.extensions import PINELABS_EXTENSION_NAME
 from care_pinelabs.models.pinelabs_terminal import PinelabsTerminal
 from care_pinelabs.services.specs.plutus_cloud import (
     CancelTransactionResponseData,
@@ -28,6 +29,8 @@ from care_pinelabs.services.specs.plutus_cloud import (
 )
 
 PINELABS_META_KEY = "pinelabs"
+
+PINELABS_EXTENSION_FIELDS = ("ApprovalCode", "TID", "TxnPlutusId", "TxnLogId")
 
 PLUTUS_RESPONSE_CODE_APPROVED = 0
 PLUTUS_RESPONSE_CODE_VOIDED = 1008
@@ -46,6 +49,23 @@ def _metainfo_to_dict(items) -> dict[str, str | None]:
     if not items:
         return {}
     return {item.Tag: item.Value for item in items}
+
+
+def build_pinelabs_extension_update(
+    instance: PaymentReconciliation, transaction_data: dict[str, str | None]
+) -> dict[str, Any]:
+    fields = {
+        key: transaction_data[key]
+        for key in PINELABS_EXTENSION_FIELDS
+        if key in transaction_data
+    }
+    if not fields:
+        return dict(instance.extensions or {})
+    extensions = dict(instance.extensions or {})
+    existing = dict(extensions.get(PINELABS_EXTENSION_NAME, {}))
+    existing.update(fields)
+    extensions[PINELABS_EXTENSION_NAME] = existing
+    return extensions
 
 
 def build_upload_meta(
@@ -74,10 +94,15 @@ def build_status_meta(
     existing_meta: dict[str, Any], response: GetStatusResponseData
 ) -> dict[str, Any]:
     pinelabs_meta = dict(existing_meta.get(PINELABS_META_KEY, {}))
+    transaction_data = _metainfo_to_dict(response.transaction_data)
     pinelabs_meta["status"] = {
         "response_code": response.response_code,
         "response_message": response.response_message,
-        "transaction_data": _metainfo_to_dict(response.transaction_data),
+        "transaction_data": {
+            key: value
+            for key, value in transaction_data.items()
+            if key not in PINELABS_EXTENSION_FIELDS
+        },
     }
     return {PINELABS_META_KEY: pinelabs_meta}
 
@@ -131,6 +156,7 @@ def apply_status_to_reconciliation(
         **build_status_meta(instance.meta or {}, response),
     }
     transaction_data = _metainfo_to_dict(response.transaction_data)
+    instance.extensions = build_pinelabs_extension_update(instance, transaction_data)
 
     instance.outcome = new_outcome.value
     instance.status = new_status.value

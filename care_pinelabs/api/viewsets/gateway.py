@@ -67,8 +67,9 @@ class GatewayViewSet(GenericViewSet):
     def _serialize_reconciliation_with_meta(instance: PaymentReconciliation) -> dict:
         """Serialize reconciliation including meta field for Pine Labs endpoints."""
         serialized = PaymentReconciliationReadSpec.serialize(instance).to_json()
-        # Explicitly include meta field for Pine Labs gateway endpoints
+        # Explicitly include meta and extensions fields for Pine Labs gateway endpoints
         serialized["meta"] = instance.meta or {}
+        serialized["extensions"] = instance.extensions or {}
         return serialized
 
     @extend_schema(request=UploadTransactionSpec)
