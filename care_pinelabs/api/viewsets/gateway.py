@@ -159,7 +159,7 @@ class GatewayViewSet(GenericViewSet):
         reconciliation = self._get_reconciliation(request_data.payment_reconciliation)
 
         try:
-            reconciliation, already_updated = refresh_payment_reconciliation_status(
+            reconciliation, status_changed = refresh_payment_reconciliation_status(
                 reconciliation,
                 user=request.user,
             )
@@ -198,7 +198,7 @@ class GatewayViewSet(GenericViewSet):
             )
 
         response_data = self._serialize_reconciliation_with_meta(reconciliation)
-        response_data["already_updated"] = already_updated
+        response_data["status_changed"] = status_changed
 
         return Response(response_data)
 

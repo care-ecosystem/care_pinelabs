@@ -254,8 +254,8 @@ def refresh_payment_reconciliation_status(
     """
     Refresh payment reconciliation status from Pine Labs.
 
-    Returns tuple of (reconciliation, already_updated)
-    where already_updated is True if status was unchanged.
+    Returns tuple of (reconciliation, status_changed)
+    where status_changed is True if status was updated.
     """
     from care_pinelabs.models.pinelabs_terminal import PinelabsTerminal
     from care_pinelabs.services.plutus_cloud import PlutusCloudService
@@ -290,10 +290,10 @@ def refresh_payment_reconciliation_status(
     current_status_meta = current_pinelabs_meta.get("status", {})
     current_response_code = current_status_meta.get("response_code")
 
-    already_updated = current_response_code == plutus_response.response_code
+    status_changed = current_response_code != plutus_response.response_code
 
     # 6. Apply status to reconciliation only if changed
-    if not already_updated:
+    if status_changed:
         apply_status_to_reconciliation(instance, plutus_response)
 
-    return instance, already_updated
+    return instance, status_changed
