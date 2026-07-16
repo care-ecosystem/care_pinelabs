@@ -179,6 +179,8 @@ class GatewayViewSet(GenericViewSet):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        except PermissionDenied:
+            raise
         except Exception as e:
             logger.error(
                 "Pinelabs refresh_transaction_status API call failed: %s",
