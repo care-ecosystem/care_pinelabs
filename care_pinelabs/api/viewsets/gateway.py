@@ -5,9 +5,12 @@ from django.db import transaction
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
+
+from care.security.authorization.base import AuthorizationController
 
 from care.emr.models.payment_reconciliation import PaymentReconciliation
 from care.emr.resources.payment_reconciliation.spec import (
@@ -29,6 +32,7 @@ from care_pinelabs.services.payment_reconciliation import (
     build_upload_meta,
     cancel_payment_reconciliation,
     create_payment_reconciliation,
+    refresh_payment_reconciliation_status,
     rupees_to_paise,
 )
 from care_pinelabs.services.plutus_cloud import PlutusCloudService
@@ -58,6 +62,14 @@ class GatewayViewSet(GenericViewSet):
     @staticmethod
     def _serialize_reconciliation(instance: PaymentReconciliation) -> dict:
         return PaymentReconciliationReadSpec.serialize(instance).to_json()
+
+    @staticmethod
+    def _serialize_reconciliation_with_meta(instance: PaymentReconciliation) -> dict:
+        """Serialize reconciliation including meta field for Pine Labs endpoints."""
+        serialized = PaymentReconciliationReadSpec.serialize(instance).to_json()
+        # Explicitly include meta field for Pine Labs gateway endpoints
+        serialized["meta"] = instance.meta or {}
+        return serialized
 
     @extend_schema(request=UploadTransactionSpec)
     @action(detail=False, methods=["POST"])
@@ -130,7 +142,67 @@ class GatewayViewSet(GenericViewSet):
         request_data = TransactionStatusSpec.model_validate(request.data)
         reconciliation = self._get_reconciliation(request_data.payment_reconciliation)
 
-        return Response(self._serialize_reconciliation(reconciliation))
+        return Response(self._serialize_reconciliation_with_meta(reconciliation))
+
+    @extend_schema(request=TransactionStatusSpec)
+    @action(detail=False, methods=["POST"])
+    def refresh_transaction_status(self, request):
+        """
+        Manually refresh transaction status from Pine Labs.
+
+        Fetches the latest status from Plutus and updates the PaymentReconciliation
+        record immediately, rather than waiting for background polling.
+
+        Use this endpoint when you need real-time status updates.
+        """
+        request_data = TransactionStatusSpec.model_validate(request.data)
+        reconciliation = self._get_reconciliation(request_data.payment_reconciliation)
+
+        try:
+            reconciliation, status_changed = refresh_payment_reconciliation_status(
+                reconciliation,
+                user=request.user,
+            )
+        except ValidationError as e:
+            logger.error(
+                "PaymentReconciliation %s missing pinelabs metadata for refresh",
+                reconciliation.external_id,
+            )
+            return Response(
+                {
+                    "errors": [
+                        {
+                            "type": "pinelabs_metadata_missing",
+                            "msg": str(e),
+                        }
+                    ]
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except PermissionDenied:
+            raise
+        except Exception as e:
+            logger.error(
+                "Pinelabs refresh_transaction_status API call failed: %s",
+                str(e),
+                exc_info=True,
+            )
+            return Response(
+                {
+                    "errors": [
+                        {
+                            "type": "pinelabs_api_error",
+                            "msg": "Failed to fetch status from Pine Labs. Please try again later.",
+                        }
+                    ]
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        response_data = self._serialize_reconciliation_with_meta(reconciliation)
+        response_data["status_changed"] = status_changed
+
+        return Response(response_data)
 
     @extend_schema(request=CancelTransactionSpec)
     @action(detail=False, methods=["POST"])
