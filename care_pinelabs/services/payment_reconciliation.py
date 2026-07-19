@@ -359,7 +359,7 @@ def authorize_payment_reconciliation_read(
 ) -> None:
     """Check if user has permission to read payment reconciliation."""
     if not AuthorizationController.call(
-        "can_list_payment_reconciliation_in_facility", user, instance.facility
+        "can_read_payment_reconciliation_in_facility", user, instance.facility
     ):
         raise PermissionDenied("Cannot read payment reconciliation")
 
