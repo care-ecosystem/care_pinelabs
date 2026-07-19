@@ -142,10 +142,18 @@ def apply_status_to_reconciliation(
         instance.payment_datetime = care_now()
 
     instance.save()
+
+    # Mark terminal transaction as completed if payment reached terminal state
+    is_terminal_state = new_outcome != PaymentReconciliationOutcomeOptions.queued
+    if is_terminal_state:
+        # Check if this payment has a linked terminal transaction
+        if hasattr(instance, "terminal_transaction") and instance.terminal_transaction:
+            instance.terminal_transaction.mark_completed()
+
     if new_outcome == PaymentReconciliationOutcomeOptions.complete:
         rebalance_account_task(instance.account_id)
 
-    return new_outcome != PaymentReconciliationOutcomeOptions.queued
+    return is_terminal_state
 
 
 def authorize_payment_reconciliation_create(

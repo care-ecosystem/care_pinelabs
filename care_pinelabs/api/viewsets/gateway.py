@@ -1,7 +1,7 @@
 import logging
-from uuid import uuid4
 
 from django.db import transaction
+from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
@@ -14,6 +14,7 @@ from care.security.authorization.base import AuthorizationController
 
 from care.emr.models.payment_reconciliation import PaymentReconciliation
 from care.emr.resources.payment_reconciliation.spec import (
+    PaymentReconciliationOutcomeOptions,
     PaymentReconciliationReadSpec,
     PaymentReconciliationStatusOptions,
 )
@@ -29,7 +30,6 @@ from care_pinelabs.services.payment_reconciliation import (
     PINELABS_META_KEY,
     PLUTUS_RESPONSE_CODE_APPROVED,
     build_cancel_meta,
-    build_upload_meta,
     cancel_payment_reconciliation,
     create_payment_reconciliation,
     refresh_payment_reconciliation_status,
@@ -40,6 +40,8 @@ from care_pinelabs.services.specs.plutus_cloud import (
     CancelTransactionRequestData,
     UploadTransactionRequestData,
 )
+from care_pinelabs.services.terminal_transaction import acquire_terminal_lock
+from care_pinelabs.services.transaction_number import generate_transaction_number
 from care_pinelabs.settings import plugin_settings
 from care_pinelabs.tasks.poll_transaction_status import poll_pinelabs_transaction_status
 
@@ -74,67 +76,264 @@ class GatewayViewSet(GenericViewSet):
     @extend_schema(request=UploadTransactionSpec)
     @action(detail=False, methods=["POST"])
     def upload_transaction(self, request):
+        """
+        Upload transaction to Pine Labs terminal.
+
+        New flow with terminal locking:
+        1. Authorize user
+        2. Check terminal is active
+        3. Generate transaction number
+        4. Acquire terminal lock (blocks device with "started" status)
+        5. Create payment reconciliation (draft, initiated)
+        6. Upload to Pine Labs
+        7. On success: mark uploaded, update status to "in_progress"
+        8. Start polling
+        """
         request_data = UploadTransactionSpec.model_validate(request.data)
         terminal = self._get_terminal(request_data.terminal)
         user = request.user
 
-        transaction_number = str(uuid4())
-        plutus_response = PlutusCloudService().upload_transaction(
-            UploadTransactionRequestData(
-                transaction_number=transaction_number,
-                sequence_number=1,
-                allowed_payment_mode=request_data.payment_mode,
-                amount=rupees_to_paise(request_data.amount),
-                user_id=user.username,
-                client_id=terminal.client_id,
-                store_id=terminal.store_id,
-                auto_cancel_duration_in_minutes=plugin_settings.PINELABS_AUTO_CANCEL_DURATION_MINUTES,
-            )
-        )
+        # Get account and invoice for transaction number generation
+        from care.emr.models.account import Account
+        from care.emr.models.invoice import Invoice
 
-        if (
-            plutus_response.response_code != PLUTUS_RESPONSE_CODE_APPROVED
-            or plutus_response.transaction_reference_id is None
-        ):
-            logger.warning(
-                "Pinelabs upload_transaction failed: code=%s message=%s",
-                plutus_response.response_code,
-                plutus_response.response_message,
-            )
+        account = get_object_or_404(Account, external_id=request_data.account)
+        invoice = None
+        if request_data.target_invoice:
+            invoice = get_object_or_404(Invoice, external_id=request_data.target_invoice)
+
+            # Validate invoice is not already balanced
+            if invoice.status == "balanced":
+                return Response(
+                    {
+                        "errors": [
+                            {
+                                "type": "invoice_already_balanced",
+                                "msg": f"Invoice {invoice.number} is already balanced. No payment required.",
+                            }
+                        ]
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            # Validate amount does not exceed invoice total
+            if request_data.amount > invoice.total_gross:
+                return Response(
+                    {
+                        "errors": [
+                            {
+                                "type": "amount_exceeds_invoice_total",
+                                "msg": f"Payment amount {request_data.amount} exceeds invoice total {invoice.total_gross}.",
+                            }
+                        ]
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # Check terminal is active
+        if not terminal.is_active:
             return Response(
                 {
                     "errors": [
                         {
-                            "type": "pinelabs_upload_failed",
-                            "msg": plutus_response.response_message,
-                            "code": plutus_response.response_code,
+                            "type": "terminal_inactive",
+                            "msg": f"Terminal {terminal.name} is not active",
                         }
                     ]
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        reconciliation = create_payment_reconciliation(
-            request_data,
-            facility=terminal.facility,
-            user=user,
-            meta=build_upload_meta(
-                terminal=terminal,
-                transaction_number=transaction_number,
-                payment_mode=request_data.payment_mode.value,
-                response=plutus_response,
-            ),
-        )
-        transaction.on_commit(
-            lambda: poll_pinelabs_transaction_status.delay(
-                payment_reconciliation_id=reconciliation.id
-            )
+        # Generate transaction number
+        transaction_number = generate_transaction_number(account=account, invoice=invoice)
+
+        logger.info(
+            "Generated transaction number: %s (account=%s, invoice=%s)",
+            transaction_number,
+            account.id,
+            invoice.number if invoice else None,
         )
 
-        return Response(
-            self._serialize_reconciliation(reconciliation),
-            status=status.HTTP_201_CREATED,
-        )
+        try:
+            with transaction.atomic():
+                # Acquire terminal lock (blocks device with "started" status)
+                terminal_txn = acquire_terminal_lock(
+                    terminal=terminal,
+                    account=account,
+                    invoice=invoice,
+                    transaction_number=transaction_number,
+                    payment_mode=request_data.payment_mode.value,
+                )
+
+                logger.info(
+                    "Terminal lock acquired: %s (terminal=%s, status=%s)",
+                    transaction_number,
+                    terminal.name,
+                    terminal_txn.status,
+                )
+
+                # Create payment reconciliation (draft, initiated)
+                reconciliation = create_payment_reconciliation(
+                    request_data,
+                    facility=terminal.facility,
+                    user=user,
+                    meta={
+                        "pinelabs": {
+                            "terminal_id": str(terminal.external_id),
+                            "transaction_number": transaction_number,
+                            "payment_mode": request_data.payment_mode.value,
+                        }
+                    },
+                )
+
+                # Link terminal transaction to payment
+                terminal_txn.payment_reconciliation = reconciliation
+                terminal_txn.save(update_fields=["payment_reconciliation", "modified_date"])
+
+                logger.info(
+                    "Payment reconciliation created: %s (status=%s, outcome=%s)",
+                    reconciliation.external_id,
+                    reconciliation.status,
+                    reconciliation.outcome,
+                )
+
+                # Upload to Pine Labs
+                try:
+                    plutus_response = PlutusCloudService().upload_transaction(
+                        UploadTransactionRequestData(
+                            transaction_number=transaction_number,
+                            sequence_number=1,
+                            allowed_payment_mode=request_data.payment_mode,
+                            amount=rupees_to_paise(request_data.amount),
+                            user_id=user.username,
+                            client_id=terminal.client_id,
+                            store_id=terminal.store_id,
+                            auto_cancel_duration_in_minutes=plugin_settings.PINELABS_AUTO_CANCEL_DURATION_MINUTES,
+                        )
+                    )
+
+                    logger.info(
+                        "Pine Labs upload response: code=%s, message=%s, PTRID=%s",
+                        plutus_response.response_code,
+                        plutus_response.response_message,
+                        plutus_response.transaction_reference_id,
+                    )
+
+                    # Check if upload succeeded
+                    if (
+                        plutus_response.response_code != PLUTUS_RESPONSE_CODE_APPROVED
+                        or plutus_response.transaction_reference_id is None
+                    ):
+                        # Upload failed - mark terminal transaction as completed
+                        terminal_txn.mark_completed()
+
+                        # Mark payment reconciliation as ERROR
+                        reconciliation.status = PaymentReconciliationStatusOptions.cancelled.value
+                        reconciliation.outcome = PaymentReconciliationOutcomeOptions.error.value
+                        reconciliation.meta["pinelabs"]["upload"] = {
+                            "response_code": plutus_response.response_code,
+                            "response_message": plutus_response.response_message,
+                            "failed_at": timezone.now().isoformat(),
+                        }
+                        reconciliation.save(update_fields=["status", "outcome", "meta", "modified_date"])
+
+                        logger.warning(
+                            "Pine Labs upload failed: %s (code=%s, payment marked as error)",
+                            plutus_response.response_message,
+                            plutus_response.response_code,
+                        )
+
+                        return Response(
+                            {
+                                "errors": [
+                                    {
+                                        "type": "pinelabs_upload_failed",
+                                        "msg": plutus_response.response_message,
+                                        "code": plutus_response.response_code,
+                                    }
+                                ]
+                            },
+                            status=status.HTTP_400_BAD_REQUEST,
+                        )
+
+                    # On success - mark uploaded and update to "in_progress"
+                    ptrid = str(plutus_response.transaction_reference_id)
+                    terminal_txn.mark_uploaded(ptrid)
+
+                    logger.info(
+                        "Terminal transaction marked uploaded: %s (PTRID=%s, status=%s)",
+                        transaction_number,
+                        ptrid,
+                        terminal_txn.status,
+                    )
+
+                    # Update payment reconciliation
+                    reconciliation.meta["pinelabs"]["transaction_reference_id"] = ptrid
+                    reconciliation.meta["pinelabs"]["upload"] = {
+                        "response_code": plutus_response.response_code,
+                        "response_message": plutus_response.response_message,
+                        "uploaded_at": timezone.now().isoformat(),
+                    }
+                    reconciliation.save(update_fields=["meta", "modified_date"])
+
+                    logger.info(
+                        "Payment reconciliation updated: %s (outcome=%s)",
+                        reconciliation.external_id,
+                        reconciliation.outcome,
+                    )
+
+                except Exception as e:
+                    logger.error("Pine Labs API call failed: %s", str(e), exc_info=True)
+                    # Mark terminal transaction as completed so terminal is freed
+                    terminal_txn.mark_completed()
+
+                    # Mark payment reconciliation as ERROR
+                    reconciliation.status = PaymentReconciliationStatusOptions.cancelled.value
+                    reconciliation.outcome = PaymentReconciliationOutcomeOptions.error.value
+                    reconciliation.meta["pinelabs"]["upload_error"] = {
+                        "error": str(e),
+                        "failed_at": timezone.now().isoformat(),
+                    }
+                    reconciliation.save(update_fields=["status", "outcome", "meta", "modified_date"])
+
+                    raise
+
+                # Start polling (normal flow)
+                transaction.on_commit(
+                    lambda: poll_pinelabs_transaction_status.delay(
+                        payment_reconciliation_id=reconciliation.id
+                    )
+                )
+
+                logger.info(
+                    "Polling task scheduled for payment: %s", reconciliation.external_id
+                )
+
+                return Response(
+                    self._serialize_reconciliation(reconciliation),
+                    status=status.HTTP_201_CREATED,
+                )
+
+        except ValidationError as e:
+            # Terminal busy / invoice busy / account busy / duplicate transaction
+            logger.warning("Terminal lock acquisition failed: %s", str(e))
+            # Extract clean error message from ErrorDetail
+            if isinstance(e.detail, list):
+                error_msg = str(e.detail[0]) if e.detail else "Validation error"
+            elif isinstance(e.detail, dict):
+                # If detail is a dict, extract first value
+                error_msg = str(next(iter(e.detail.values()))) if e.detail else "Validation error"
+            else:
+                error_msg = str(e.detail)
+
+            return Response(
+                {"errors": [{"type": "validation_error", "msg": error_msg}]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        except Exception as e:
+            logger.error("Unexpected error in upload_transaction: %s", str(e), exc_info=True)
+            raise
 
     @extend_schema(request=TransactionStatusSpec)
     @action(detail=False, methods=["POST"])
