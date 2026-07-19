@@ -156,9 +156,57 @@ def apply_status_to_reconciliation(
     return is_terminal_state
 
 
+def validate_upload_business_rules(terminal, invoice, amount):
+    """
+    Validate business rules for transaction upload.
+
+    Args:
+        terminal: PinelabsTerminal instance
+        invoice: Invoice instance (optional, can be None for account payments)
+        amount: Payment amount (Decimal)
+
+    Raises:
+        ValidationError: If any business rule validation fails
+    """
+    from care_pinelabs.models.pinelabs_terminal import PinelabsTerminal
+
+    # Check terminal is active
+    if not terminal.is_active:
+        raise ValidationError(f"Terminal {terminal.name} is not active")
+
+    # Invoice-specific validations (only if invoice payment)
+    if invoice:
+        # Validate invoice is not already balanced
+        if invoice.status == "balanced":
+            raise ValidationError(
+                f"Invoice {invoice.number} is already balanced. No payment required."
+            )
+
+        # Validate amount does not exceed invoice total
+        if amount > invoice.total_gross:
+            raise ValidationError(
+                f"Payment amount {amount} exceeds invoice total {invoice.total_gross}."
+            )
+
+
 def authorize_payment_reconciliation_create(
     spec: PaymentReconciliationWriteSpec, facility: Facility, user
-) -> Account:
+) -> tuple[Account, Invoice | None]:
+    """
+    Authorize payment reconciliation creation.
+
+    Args:
+        spec: PaymentReconciliationWriteSpec
+        facility: Facility instance
+        user: User instance
+
+    Returns:
+        tuple: (account, invoice) where invoice can be None for account payments
+
+    Raises:
+        PermissionDenied: If user lacks permissions
+        ValidationError: If validation fails
+    """
     account = get_object_or_404(Account, external_id=spec.account)
     if not AuthorizationController.call(
         "can_write_payment_reconciliation_in_facility", user, facility
@@ -174,13 +222,16 @@ def authorize_payment_reconciliation_create(
             "can_list_facility_location_obj", user, facility, location
         ):
             raise PermissionDenied("You do not have permission to given location")
+
+    invoice = None
     if spec.target_invoice:
         invoice = get_object_or_404(
             Invoice, external_id=spec.target_invoice, account=account
         )
         if invoice.facility != facility:
             raise ValidationError("Invoice is not associated with the facility")
-    return account
+
+    return account, invoice
 
 
 def create_payment_reconciliation(
@@ -190,7 +241,8 @@ def create_payment_reconciliation(
     user,
     meta: dict | None = None,
 ) -> PaymentReconciliation:
-    authorize_payment_reconciliation_create(spec, facility, user)
+    # Note: Authorization should be done before calling this function
+    # This is a lower-level function that assumes authorization is already done
     instance = spec.de_serialize()
     instance.facility = facility
     instance.created_by = user

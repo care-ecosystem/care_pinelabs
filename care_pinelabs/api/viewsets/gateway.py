@@ -29,11 +29,13 @@ from care_pinelabs.models.pinelabs_terminal import PinelabsTerminal
 from care_pinelabs.services.payment_reconciliation import (
     PINELABS_META_KEY,
     PLUTUS_RESPONSE_CODE_APPROVED,
+    authorize_payment_reconciliation_create,
     build_cancel_meta,
     cancel_payment_reconciliation,
     create_payment_reconciliation,
     refresh_payment_reconciliation_status,
     rupees_to_paise,
+    validate_upload_business_rules,
 )
 from care_pinelabs.services.plutus_cloud import PlutusCloudService
 from care_pinelabs.services.specs.plutus_cloud import (
@@ -73,74 +75,62 @@ class GatewayViewSet(GenericViewSet):
         serialized["meta"] = instance.meta or {}
         return serialized
 
+    @staticmethod
+    def _extract_validation_error_message(e: ValidationError) -> str:
+        """Extract clean error message from DRF ValidationError."""
+        if isinstance(e.detail, list):
+            return str(e.detail[0]) if e.detail else "Validation error"
+        elif isinstance(e.detail, dict):
+            return str(next(iter(e.detail.values()))) if e.detail else "Validation error"
+        else:
+            return str(e.detail)
+
     @extend_schema(request=UploadTransactionSpec)
     @action(detail=False, methods=["POST"])
     def upload_transaction(self, request):
         """
         Upload transaction to Pine Labs terminal.
 
-        New flow with terminal locking:
-        1. Authorize user
-        2. Check terminal is active
-        3. Generate transaction number
-        4. Acquire terminal lock (blocks device with "started" status)
-        5. Create payment reconciliation (draft, initiated)
-        6. Upload to Pine Labs
-        7. On success: mark uploaded, update status to "in_progress"
-        8. Start polling
+        Clean flow:
+        1. Get terminal
+        2. Authorize (permissions + get account/invoice)
+        3. Validate business rules (terminal active, invoice balanced, amount)
+        4. Generate transaction number
+        5. Acquire terminal lock
+        6. Create payment reconciliation
+        7. Upload to Pine Labs
+        8. On success: mark uploaded
+        9. Start polling
         """
         request_data = UploadTransactionSpec.model_validate(request.data)
         terminal = self._get_terminal(request_data.terminal)
         user = request.user
 
-        # Get account and invoice for transaction number generation
-        from care.emr.models.account import Account
-        from care.emr.models.invoice import Invoice
-
-        account = get_object_or_404(Account, external_id=request_data.account)
-        invoice = None
-        if request_data.target_invoice:
-            invoice = get_object_or_404(Invoice, external_id=request_data.target_invoice)
-
-            # Validate invoice is not already balanced
-            if invoice.status == "balanced":
+        # Step 1: Authorize and get account/invoice (single fetch)
+        try:
+            account, invoice = authorize_payment_reconciliation_create(
+                request_data, terminal.facility, user
+            )
+        except (ValidationError, PermissionDenied) as e:
+            logger.warning("Authorization failed: %s", str(e))
+            if isinstance(e, ValidationError):
                 return Response(
-                    {
-                        "errors": [
-                            {
-                                "type": "invoice_already_balanced",
-                                "msg": f"Invoice {invoice.number} is already balanced. No payment required.",
-                            }
-                        ]
-                    },
+                    {"errors": [{"type": "validation_error", "msg": self._extract_validation_error_message(e)}]},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-
-            # Validate amount does not exceed invoice total
-            if request_data.amount > invoice.total_gross:
+            else:
                 return Response(
-                    {
-                        "errors": [
-                            {
-                                "type": "amount_exceeds_invoice_total",
-                                "msg": f"Payment amount {request_data.amount} exceeds invoice total {invoice.total_gross}.",
-                            }
-                        ]
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
+                    {"errors": [{"type": "permission_denied", "msg": str(e)}]},
+                    status=status.HTTP_403_FORBIDDEN,
                 )
 
-        # Check terminal is active
-        if not terminal.is_active:
+        # Step 2: Validate business rules
+        try:
+            validate_upload_business_rules(terminal, invoice, request_data.amount)
+        except ValidationError as e:
+            logger.warning("Business validation failed: %s", str(e))
             return Response(
-                {
-                    "errors": [
-                        {
-                            "type": "terminal_inactive",
-                            "msg": f"Terminal {terminal.name} is not active",
-                        }
-                    ]
-                },
+                {"errors": [{"type": "validation_error", "msg": self._extract_validation_error_message(e)}]},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -317,17 +307,8 @@ class GatewayViewSet(GenericViewSet):
         except ValidationError as e:
             # Terminal busy / invoice busy / account busy / duplicate transaction
             logger.warning("Terminal lock acquisition failed: %s", str(e))
-            # Extract clean error message from ErrorDetail
-            if isinstance(e.detail, list):
-                error_msg = str(e.detail[0]) if e.detail else "Validation error"
-            elif isinstance(e.detail, dict):
-                # If detail is a dict, extract first value
-                error_msg = str(next(iter(e.detail.values()))) if e.detail else "Validation error"
-            else:
-                error_msg = str(e.detail)
-
             return Response(
-                {"errors": [{"type": "validation_error", "msg": error_msg}]},
+                {"errors": [{"type": "validation_error", "msg": self._extract_validation_error_message(e)}]},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
