@@ -182,10 +182,23 @@ def validate_upload_business_rules(terminal, invoice, amount):
                 f"Invoice {invoice.number} is already balanced. No payment required."
             )
 
-        # Validate amount does not exceed invoice total
-        if amount > invoice.total_gross:
+        # Validate amount does not exceed remaining balance
+        from decimal import Decimal
+
+        total_gross = Decimal(str(invoice.total_gross))
+        existing_payments = Decimal(str(invoice.total_payments or 0))
+        remaining_balance = total_gross - existing_payments
+
+        if amount > remaining_balance:
+            # Format amounts nicely (remove trailing zeros)
+            amount_str = f"{amount:.2f}".rstrip('0').rstrip('.')
+            remaining_str = f"{remaining_balance:.2f}".rstrip('0').rstrip('.')
+            total_str = f"{total_gross:.2f}".rstrip('0').rstrip('.')
+            existing_str = f"{existing_payments:.2f}".rstrip('0').rstrip('.')
+
             raise ValidationError(
-                f"Payment amount {amount} exceeds invoice total {invoice.total_gross}."
+                f"Payment amount {amount_str} exceeds remaining balance {remaining_str}. "
+                f"Invoice total: {total_str}, Already paid: {existing_str}."
             )
 
 
