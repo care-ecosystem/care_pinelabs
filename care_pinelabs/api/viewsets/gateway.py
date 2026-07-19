@@ -29,7 +29,9 @@ from care_pinelabs.models.pinelabs_terminal import PinelabsTerminal
 from care_pinelabs.services.payment_reconciliation import (
     PINELABS_META_KEY,
     PLUTUS_RESPONSE_CODE_APPROVED,
+    authorize_payment_reconciliation_cancel,
     authorize_payment_reconciliation_create,
+    authorize_payment_reconciliation_read,
     build_cancel_meta,
     cancel_payment_reconciliation,
     create_payment_reconciliation,
@@ -319,8 +321,14 @@ class GatewayViewSet(GenericViewSet):
     @extend_schema(request=TransactionStatusSpec)
     @action(detail=False, methods=["POST"])
     def transaction_status(self, request):
+        # Validate request data first
         request_data = TransactionStatusSpec.model_validate(request.data)
+
+        # Get reconciliation
         reconciliation = self._get_reconciliation(request_data.payment_reconciliation)
+
+        # Authorize: user must have read permission
+        authorize_payment_reconciliation_read(reconciliation, request.user)
 
         return Response(self._serialize_reconciliation_with_meta(reconciliation))
 
@@ -389,6 +397,9 @@ class GatewayViewSet(GenericViewSet):
     def cancel_transaction(self, request):
         request_data = CancelTransactionSpec.model_validate(request.data)
         reconciliation = self._get_reconciliation(request_data.payment_reconciliation)
+
+        # Authorize FIRST before any external API calls
+        authorize_payment_reconciliation_cancel(reconciliation, request.user)
 
         pinelabs_meta = (reconciliation.meta or {}).get(PINELABS_META_KEY, {})
         terminal_external_id = pinelabs_meta.get("terminal_id")

@@ -125,12 +125,62 @@ def resolve_status_outcome(
 def apply_status_to_reconciliation(
     instance: PaymentReconciliation, response: GetStatusResponseData
 ) -> bool:
+    import logging
+
+    logger = logging.getLogger(__name__)
+
     new_status, new_outcome = resolve_status_outcome(response)
     instance.meta = {
         **(instance.meta or {}),
         **build_status_meta(instance.meta or {}, response),
     }
     transaction_data = _metainfo_to_dict(response.transaction_data)
+
+    # Validate authorized amount matches requested amount (only for successful transactions)
+    if new_outcome == PaymentReconciliationOutcomeOptions.complete:
+        authorized_amount_paise = transaction_data.get("Amount")
+        if authorized_amount_paise:
+            try:
+                authorized_amount_paise = int(authorized_amount_paise)
+                requested_amount_paise = rupees_to_paise(instance.amount)
+
+                if authorized_amount_paise != requested_amount_paise:
+                    # Partial authorization detected - log error and update amount
+                    from decimal import Decimal
+
+                    authorized_amount_rupees = Decimal(authorized_amount_paise) / PAISE_PER_RUPEE
+
+                    logger.error(
+                        "Partial authorization detected for payment %s: "
+                        "Requested %s paise (%s rupees), Authorized %s paise (%s rupees)",
+                        instance.external_id,
+                        requested_amount_paise,
+                        instance.amount,
+                        authorized_amount_paise,
+                        authorized_amount_rupees,
+                    )
+
+                    # Add error info to meta
+                    if "pinelabs" not in instance.meta:
+                        instance.meta["pinelabs"] = {}
+                    instance.meta["pinelabs"]["partial_authorization"] = {
+                        "requested_amount_paise": requested_amount_paise,
+                        "authorized_amount_paise": authorized_amount_paise,
+                        "requested_amount_rupees": str(instance.amount),
+                        "authorized_amount_rupees": str(authorized_amount_rupees),
+                        "error": "Gateway authorized a different amount than requested",
+                        "detected_at": care_now().isoformat(),
+                    }
+
+                    # Update the payment amount to match what was actually authorized
+                    instance.amount = authorized_amount_rupees
+
+            except (ValueError, TypeError) as e:
+                logger.warning(
+                    "Failed to parse authorized amount for payment %s: %s",
+                    instance.external_id,
+                    str(e),
+                )
 
     instance.outcome = new_outcome.value
     instance.status = new_status.value
@@ -302,6 +352,16 @@ def cancel_payment_reconciliation(
     instance.save()
     rebalance_account_task(instance.account_id)
     return instance
+
+
+def authorize_payment_reconciliation_read(
+    instance: PaymentReconciliation, user
+) -> None:
+    """Check if user has permission to read payment reconciliation."""
+    if not AuthorizationController.call(
+        "can_list_payment_reconciliation_in_facility", user, instance.facility
+    ):
+        raise PermissionDenied("Cannot read payment reconciliation")
 
 
 def authorize_payment_reconciliation_refresh(

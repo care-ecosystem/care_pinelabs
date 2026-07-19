@@ -36,6 +36,7 @@ class PlutusCloudService:
         response = requests.post(
             url, json=payload, timeout=plugin_settings.PINELABS_API_TIMEOUT
         )
+        response.raise_for_status()  # Raise HTTPError for 4xx/5xx responses
 
         response_data = response.json()
         return UploadTransactionResponseData(
@@ -60,6 +61,7 @@ class PlutusCloudService:
         response = requests.post(
             url, json=payload, timeout=plugin_settings.PINELABS_API_TIMEOUT
         )
+        response.raise_for_status()  # Raise HTTPError for 4xx/5xx responses
 
         response_data = response.json()
         return GetStatusResponseData(
@@ -89,6 +91,7 @@ class PlutusCloudService:
         response = requests.post(
             url, json=payload, timeout=plugin_settings.PINELABS_API_TIMEOUT
         )
+        response.raise_for_status()  # Raise HTTPError for 4xx/5xx responses
 
         response_data = response.json()
         return CancelTransactionResponseData(
