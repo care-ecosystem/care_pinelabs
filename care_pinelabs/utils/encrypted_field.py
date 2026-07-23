@@ -32,5 +32,6 @@ class EncryptedCharField(models.TextField):
             return value
         try:
             return _get_fernet().decrypt(value.encode()).decode()
-        except InvalidToken:
-            return value
+        except InvalidToken as e:
+            msg = "Failed to decrypt value: wrong key or corrupted ciphertext."
+            raise ValueError(msg) from e
