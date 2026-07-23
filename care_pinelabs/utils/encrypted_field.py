@@ -14,7 +14,7 @@ def _get_fernet() -> Fernet:
     return Fernet(key)
 
 
-class EncryptedCharField(models.CharField):
+class EncryptedCharField(models.TextField):
     """
     Transparently encrypts the value at rest using Fernet (symmetric,
     reversible) — unlike Django's password hashing, the plaintext must be

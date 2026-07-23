@@ -11,4 +11,4 @@ class PinelabsConfig(EMRBaseModel):
     enable_advance = models.BooleanField(default=True)
     enable_partial_payment = models.BooleanField(default=False)
     pinelabs_merchant_id = models.CharField(max_length=255, null=False, blank=False)
-    pinelabs_security_token = EncryptedCharField(max_length=500, null=False, blank=False)
+    pinelabs_security_token = EncryptedCharField(null=False, blank=False)
