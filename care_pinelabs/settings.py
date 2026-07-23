@@ -100,11 +100,13 @@ class PluginSettings:  # pragma: no cover
 REQUIRED_SETTINGS = {
     "PINELABS_MERCHANT_ID",
     "PINELABS_SECURITY_TOKEN",
+    "PINELABS_SECRET_KEY",
 }
 
 DEFAULTS = {
     "PINELABS_MERCHANT_ID": "",
     "PINELABS_SECURITY_TOKEN": "",
+    "PINELABS_SECRET_KEY": "",
     "PINELABS_API_BASE_URL": "https://www.plutuscloudserviceuat.in:8201",
     "PINELABS_API_TIMEOUT": 30,
     "PINELABS_AUTO_CANCEL_DURATION_MINUTES": 5,

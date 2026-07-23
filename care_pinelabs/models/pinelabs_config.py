@@ -1,6 +1,7 @@
 from django.db import models
 
 from care.utils.models.base import BaseModel
+from care_pinelabs.utils.encrypted_field import EncryptedCharField
 
 
 class PinelabsConfig(BaseModel):
@@ -10,4 +11,4 @@ class PinelabsConfig(BaseModel):
     enable_advance = models.BooleanField(default=True)
     enable_partial_payment = models.BooleanField(default=False)
     pinelabs_merchant_id = models.CharField(max_length=255, null=False, blank=False)
-    pinelabs_security_token = models.CharField(max_length=255, null=False, blank=False)
+    pinelabs_security_token = EncryptedCharField(max_length=500, null=False, blank=False)
