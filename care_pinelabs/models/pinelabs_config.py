@@ -1,10 +1,10 @@
 from django.db import models
 
-from care.utils.models.base import BaseModel
+from care.emr.models.base import EMRBaseModel
 from care_pinelabs.utils.encrypted_field import EncryptedCharField
 
 
-class PinelabsConfig(BaseModel):
+class PinelabsConfig(EMRBaseModel):
     facility = models.OneToOneField("facility.Facility", on_delete=models.CASCADE)
     default_payment_flow = models.CharField(max_length=255, null=True, blank=True)
     payment_methods = models.JSONField(default=list)
