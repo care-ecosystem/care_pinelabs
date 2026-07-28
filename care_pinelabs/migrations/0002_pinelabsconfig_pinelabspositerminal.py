@@ -79,10 +79,10 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='pinelabspaymentmethodmapping',
-            constraint=models.UniqueConstraint(fields=('config', 'care_method'), name='unique_care_method_per_config'),
+            constraint=models.UniqueConstraint(condition=models.Q(('deleted', False)), fields=('config', 'care_method'), name='unique_care_method_per_config'),
         ),
         migrations.AddConstraint(
             model_name='pinelabspaymentmethodmapping',
-            constraint=models.UniqueConstraint(condition=models.Q(('is_default', True)), fields=('config',), name='unique_default_payment_method_per_config'),
+            constraint=models.UniqueConstraint(condition=models.Q(('is_default', True), ('deleted', False)), fields=('config',), name='unique_default_payment_method_per_config'),
         ),
     ]

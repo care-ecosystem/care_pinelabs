@@ -30,11 +30,12 @@ class PinelabsPaymentMethodMapping(BaseModel):
         constraints = [
             models.UniqueConstraint(
                 fields=["config", "care_method"],
+                condition=models.Q(deleted=False),
                 name="unique_care_method_per_config",
             ),
             models.UniqueConstraint(
                 fields=["config"],
-                condition=models.Q(is_default=True),
+                condition=models.Q(is_default=True, deleted=False),
                 name="unique_default_payment_method_per_config",
             ),
         ]
