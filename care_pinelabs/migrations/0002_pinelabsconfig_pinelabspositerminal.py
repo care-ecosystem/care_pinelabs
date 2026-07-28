@@ -29,7 +29,6 @@ class Migration(migrations.Migration):
                 ('history', models.JSONField(default=dict)),
                 ('meta', models.JSONField(default=dict)),
                 ('default_payment_flow', models.CharField(blank=True, max_length=255, null=True)),
-                ('payment_methods', models.JSONField(default=list)),
                 ('enable_advance', models.BooleanField(default=True)),
                 ('enable_partial_payment', models.BooleanField(default=False)),
                 ('pinelabs_merchant_id', models.CharField(max_length=255)),
@@ -60,5 +59,30 @@ class Migration(migrations.Migration):
             options={
                 'abstract': False,
             },
+        ),
+        migrations.CreateModel(
+            name='PinelabsPaymentMethodMapping',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('external_id', models.UUIDField(db_index=True, default=uuid.uuid4, unique=True)),
+                ('created_date', models.DateTimeField(auto_now_add=True, db_index=True, null=True)),
+                ('modified_date', models.DateTimeField(auto_now=True, db_index=True, null=True)),
+                ('deleted', models.BooleanField(db_index=True, default=False)),
+                ('care_method', models.CharField(choices=[('cash', 'cash'), ('ccca', 'ccca'), ('cchk', 'cchk'), ('cdac', 'cdac'), ('chck', 'chck'), ('ddpo', 'ddpo'), ('debc', 'debc')], max_length=255)),
+                ('pinelabs_method', models.CharField(choices=[('1', 'Card'), ('2', 'Cash'), ('10', 'UPI Sale'), ('11', 'UPI Bharat QR')], max_length=255)),
+                ('is_default', models.BooleanField(default=False)),
+                ('config', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='payment_method_mappings', to='care_pinelabs.pinelabsconfig')),
+            ],
+            options={
+                'abstract': False,
+            },
+        ),
+        migrations.AddConstraint(
+            model_name='pinelabspaymentmethodmapping',
+            constraint=models.UniqueConstraint(fields=('config', 'care_method'), name='unique_care_method_per_config'),
+        ),
+        migrations.AddConstraint(
+            model_name='pinelabspaymentmethodmapping',
+            constraint=models.UniqueConstraint(condition=models.Q(('is_default', True)), fields=('config',), name='unique_default_payment_method_per_config'),
         ),
     ]
