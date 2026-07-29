@@ -125,12 +125,62 @@ def resolve_status_outcome(
 def apply_status_to_reconciliation(
     instance: PaymentReconciliation, response: GetStatusResponseData
 ) -> bool:
+    import logging
+
+    logger = logging.getLogger(__name__)
+
     new_status, new_outcome = resolve_status_outcome(response)
     instance.meta = {
         **(instance.meta or {}),
         **build_status_meta(instance.meta or {}, response),
     }
     transaction_data = _metainfo_to_dict(response.transaction_data)
+
+    # Validate authorized amount matches requested amount (only for successful transactions)
+    if new_outcome == PaymentReconciliationOutcomeOptions.complete:
+        authorized_amount_paise = transaction_data.get("Amount")
+        if authorized_amount_paise:
+            try:
+                authorized_amount_paise = int(authorized_amount_paise)
+                requested_amount_paise = rupees_to_paise(instance.amount)
+
+                if authorized_amount_paise != requested_amount_paise:
+                    # Partial authorization detected - log error and update amount
+                    from decimal import Decimal
+
+                    authorized_amount_rupees = Decimal(authorized_amount_paise) / PAISE_PER_RUPEE
+
+                    logger.error(
+                        "Partial authorization detected for payment %s: "
+                        "Requested %s paise (%s rupees), Authorized %s paise (%s rupees)",
+                        instance.external_id,
+                        requested_amount_paise,
+                        instance.amount,
+                        authorized_amount_paise,
+                        authorized_amount_rupees,
+                    )
+
+                    # Add error info to meta
+                    if "pinelabs" not in instance.meta:
+                        instance.meta["pinelabs"] = {}
+                    instance.meta["pinelabs"]["partial_authorization"] = {
+                        "requested_amount_paise": requested_amount_paise,
+                        "authorized_amount_paise": authorized_amount_paise,
+                        "requested_amount_rupees": str(instance.amount),
+                        "authorized_amount_rupees": str(authorized_amount_rupees),
+                        "error": "Gateway authorized a different amount than requested",
+                        "detected_at": care_now().isoformat(),
+                    }
+
+                    # Update the payment amount to match what was actually authorized
+                    instance.amount = authorized_amount_rupees
+
+            except (ValueError, TypeError) as e:
+                logger.warning(
+                    "Failed to parse authorized amount for payment %s: %s",
+                    instance.external_id,
+                    str(e),
+                )
 
     instance.outcome = new_outcome.value
     instance.status = new_status.value
@@ -142,15 +192,79 @@ def apply_status_to_reconciliation(
         instance.payment_datetime = care_now()
 
     instance.save()
+
+    # Mark terminal transaction as completed if payment reached terminal state
+    is_terminal_state = new_outcome != PaymentReconciliationOutcomeOptions.queued
+    if is_terminal_state:
+        # Check if this payment has a linked terminal transaction
+        if hasattr(instance, "terminal_transaction") and instance.terminal_transaction:
+            instance.terminal_transaction.mark_completed()
+
     if new_outcome == PaymentReconciliationOutcomeOptions.complete:
         rebalance_account_task(instance.account_id)
 
-    return new_outcome != PaymentReconciliationOutcomeOptions.queued
+    return is_terminal_state
+
+
+def validate_upload_business_rules(terminal, invoice, amount):
+    """
+    Validate business rules for transaction upload.
+
+    Args:
+        terminal: PinelabsTerminal instance
+        invoice: Invoice instance (optional, can be None for account payments)
+        amount: Payment amount (Decimal)
+
+    Raises:
+        ValidationError: If any business rule validation fails
+    """
+    from care_pinelabs.models.pinelabs_terminal import PinelabsTerminal
+
+    # Check terminal is active
+    if not terminal.is_active:
+        raise ValidationError(f"Terminal {terminal.name} is not active")
+
+    # Invoice-specific validations (only if invoice payment)
+    if invoice:
+        # Validate invoice is not already balanced
+        if invoice.status == "balanced":
+            raise ValidationError(
+                f"Invoice {invoice.number} is already balanced. No payment required."
+            )
+
+        # Validate amount does not exceed invoice total
+        from decimal import Decimal
+
+        total_gross = Decimal(str(invoice.total_gross))
+
+        if amount > total_gross:
+            # Format amounts nicely (remove trailing zeros)
+            amount_str = f"{amount:.2f}".rstrip('0').rstrip('.')
+            total_str = f"{total_gross:.2f}".rstrip('0').rstrip('.')
+
+            raise ValidationError(
+                f"Payment amount {amount_str} exceeds invoice total {total_str}."
+            )
 
 
 def authorize_payment_reconciliation_create(
     spec: PaymentReconciliationWriteSpec, facility: Facility, user
-) -> Account:
+) -> tuple[Account, Invoice | None]:
+    """
+    Authorize payment reconciliation creation.
+
+    Args:
+        spec: PaymentReconciliationWriteSpec
+        facility: Facility instance
+        user: User instance
+
+    Returns:
+        tuple: (account, invoice) where invoice can be None for account payments
+
+    Raises:
+        PermissionDenied: If user lacks permissions
+        ValidationError: If validation fails
+    """
     account = get_object_or_404(Account, external_id=spec.account)
     if not AuthorizationController.call(
         "can_write_payment_reconciliation_in_facility", user, facility
@@ -166,13 +280,16 @@ def authorize_payment_reconciliation_create(
             "can_list_facility_location_obj", user, facility, location
         ):
             raise PermissionDenied("You do not have permission to given location")
+
+    invoice = None
     if spec.target_invoice:
         invoice = get_object_or_404(
             Invoice, external_id=spec.target_invoice, account=account
         )
         if invoice.facility != facility:
             raise ValidationError("Invoice is not associated with the facility")
-    return account
+
+    return account, invoice
 
 
 def create_payment_reconciliation(
@@ -182,7 +299,8 @@ def create_payment_reconciliation(
     user,
     meta: dict | None = None,
 ) -> PaymentReconciliation:
-    authorize_payment_reconciliation_create(spec, facility, user)
+    # Note: Authorization should be done before calling this function
+    # This is a lower-level function that assumes authorization is already done
     instance = spec.de_serialize()
     instance.facility = facility
     instance.created_by = user
@@ -234,6 +352,16 @@ def cancel_payment_reconciliation(
     instance.save()
     rebalance_account_task(instance.account_id)
     return instance
+
+
+def authorize_payment_reconciliation_read(
+    instance: PaymentReconciliation, user
+) -> None:
+    """Check if user has permission to read payment reconciliation."""
+    if not AuthorizationController.call(
+        "can_read_payment_reconciliation_in_facility", user, instance.facility
+    ):
+        raise PermissionDenied("Cannot read payment reconciliation")
 
 
 def authorize_payment_reconciliation_refresh(
