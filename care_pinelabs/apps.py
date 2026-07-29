@@ -7,3 +7,6 @@ PLUGIN_NAME = "care_pinelabs"
 class CarePinelabsConfig(AppConfig):
     name = PLUGIN_NAME
     verbose_name = _("Care Pinelabs")
+
+    def ready(self):
+        import care_pinelabs.extensions  # noqa F401
