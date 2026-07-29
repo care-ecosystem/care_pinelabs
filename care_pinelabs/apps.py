@@ -12,4 +12,4 @@ class CarePinelabsConfig(AppConfig):
         from care.emr.registries.device_type.device_registry import DeviceTypeRegistry
         from care_pinelabs.api.device import PinelabsDevice
 
-        DeviceTypeRegistry.register("pinelabs", PinelabsDevice)
+        DeviceTypeRegistry.register("pos-terminal", PinelabsDevice)
