@@ -29,7 +29,7 @@ class PinelabsPaymentMethodMapping(BaseModel):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["config", "care_method", "pinelabs_method"],
+                fields=["config", "pinelabs_method"],
                 condition=models.Q(deleted=False),
                 name="unique_care_method_per_config",
             ),
