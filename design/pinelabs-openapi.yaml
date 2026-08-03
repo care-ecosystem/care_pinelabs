@@ -179,6 +179,15 @@ paths:
           schema:
             type: string
             format: uuid
+        - name: mine
+          in: query
+          required: false
+          description: |
+            If true, only pos_terminals for devices belonging to
+            organizations the current user has access to are returned
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
           description: Config with embedded payment_method_mappings and pos_terminals

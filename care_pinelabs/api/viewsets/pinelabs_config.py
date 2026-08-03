@@ -1,4 +1,5 @@
 from django.db import IntegrityError, transaction
+from django.db.models import Prefetch
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -6,6 +7,7 @@ from rest_framework.response import Response
 
 from care.emr.api.viewsets.base import EMRBaseViewSet, EMRRetrieveMixin
 from care.emr.models.device import Device
+from care.emr.models.organization import FacilityOrganization, FacilityOrganizationUser
 from care.facility.models import Facility
 from care.security.authorization import AuthorizationController
 from care.utils.shortcuts import get_object_or_404
@@ -57,7 +59,30 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
             raise ValidationError("facility_id is a required query parameter")
         facility = get_object_or_404(Facility, external_id=facility_id)
         self._authorize_facility(facility)
-        instance = get_object_or_404(self.get_queryset(), facility=facility)
+
+        queryset = self.get_queryset()
+        if request.query_params.get("mine", "false").lower() == "true":
+            facility_organizations = FacilityOrganization.objects.filter(
+                facility=facility
+            ).values_list("id", flat=True)
+            if request.user.is_superuser:
+                users_facility_organizations = facility_organizations
+            else:
+                users_facility_organizations = FacilityOrganizationUser.objects.filter(
+                    organization_id__in=facility_organizations, user=request.user
+                ).values_list("organization_id", flat=True)
+            queryset = queryset.prefetch_related(
+                Prefetch(
+                    "pinelabsposterminal_set",
+                    queryset=PinelabsPosTerminal.objects.filter(
+                        device__facility_organization_cache__overlap=list(
+                            users_facility_organizations
+                        )
+                    ),
+                )
+            )
+
+        instance = get_object_or_404(queryset, facility=facility)
         return Response(PinelabsConfigReadSpec.serialize(instance).to_json())
 
     @staticmethod
