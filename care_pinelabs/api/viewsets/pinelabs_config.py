@@ -42,7 +42,11 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                 "payment_method_mappings",
                 Prefetch(
                     "pinelabsposterminal_set",
-                    queryset=pos_terminal_queryset or PinelabsPosTerminal.objects.all(),
+                    queryset=(
+                        PinelabsPosTerminal.objects.all()
+                        if pos_terminal_queryset is None
+                        else pos_terminal_queryset
+                    ),
                 ),
             )
         )
