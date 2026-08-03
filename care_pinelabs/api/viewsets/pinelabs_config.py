@@ -33,12 +33,18 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
     pydantic_model = PinelabsConfigCreateSpec
     pydantic_read_model = PinelabsConfigReadSpec
 
-    def get_queryset(self):
+    def get_queryset(self, pos_terminal_queryset=None):
         return (
             super()
             .get_queryset()
             .select_related("facility", "created_by", "updated_by")
-            .prefetch_related("payment_method_mappings", "pinelabsposterminal_set")
+            .prefetch_related(
+                "payment_method_mappings",
+                Prefetch(
+                    "pinelabsposterminal_set",
+                    queryset=pos_terminal_queryset or PinelabsPosTerminal.objects.all(),
+                ),
+            )
         )
 
     def _authorize_facility(self, facility):
@@ -60,7 +66,7 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
         facility = get_object_or_404(Facility, external_id=facility_id)
         self._authorize_facility(facility)
 
-        queryset = self.get_queryset()
+        pos_terminal_queryset = None
         if request.query_params.get("mine", "false").lower() == "true":
             facility_organizations = FacilityOrganization.objects.filter(
                 facility=facility
@@ -71,18 +77,15 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                 users_facility_organizations = FacilityOrganizationUser.objects.filter(
                     organization_id__in=facility_organizations, user=request.user
                 ).values_list("organization_id", flat=True)
-            queryset = queryset.prefetch_related(
-                Prefetch(
-                    "pinelabsposterminal_set",
-                    queryset=PinelabsPosTerminal.objects.filter(
-                        device__facility_organization_cache__overlap=list(
-                            users_facility_organizations
-                        )
-                    ),
+            pos_terminal_queryset = PinelabsPosTerminal.objects.filter(
+                device__facility_organization_cache__overlap=list(
+                    users_facility_organizations
                 )
             )
 
-        instance = get_object_or_404(queryset, facility=facility)
+        instance = get_object_or_404(
+            self.get_queryset(pos_terminal_queryset), facility=facility
+        )
         return Response(PinelabsConfigReadSpec.serialize(instance).to_json())
 
     @staticmethod
