@@ -45,6 +45,16 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
     def authorize_retrieve(self, instance):
         self._authorize_facility(instance.facility)
 
+    @extend_schema(responses=PinelabsConfigReadSpec)
+    def list(self, request, *args, **kwargs):
+        facility_id = request.query_params.get("facility_id")
+        if not facility_id:
+            raise ValidationError("facility_id is a required query parameter")
+        facility = get_object_or_404(Facility, external_id=facility_id)
+        self._authorize_facility(facility)
+        instance = get_object_or_404(self.get_queryset(), facility=facility)
+        return Response(PinelabsConfigReadSpec.serialize(instance).to_json())
+
     @staticmethod
     def _conflict(msg: str) -> Response:
         return Response(
