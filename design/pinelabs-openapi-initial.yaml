@@ -354,125 +354,6 @@ paths:
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalServerError'
-
-  /gateway/refresh_transaction_status/:
-    post:
-      tags:
-        - Gateway
-      summary: Refresh transaction status from Pine Labs
-      description: |
-        Actively polls the Pine Labs Plutus GetStatus API and updates the
-        reconciliation record if the upstream status has changed.
-      operationId: refreshTransactionStatus
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TransactionStatusRequest'
-      responses:
-        '200':
-          description: Refreshed payment reconciliation with embedded Pine Labs meta
-          content:
-            application/json:
-              schema:
-                allOf:
-                  - $ref: '#/components/schemas/PaymentReconciliation'
-                  - type: object
-                    required:
-                      - status_changed
-                    properties:
-                      status_changed:
-                        type: boolean
-                        description: Whether the status differed from the previously cached value
-              example:
-                status_changed: true
-        '400':
-          description: Reconciliation is missing Pine Labs metadata (terminal_id / transaction_reference_id)
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-              example:
-                errors:
-                  - type: "pinelabs_metadata_missing"
-                    msg: "Payment reconciliation is missing Pine Labs transaction metadata"
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-        '503':
-          description: Pine Labs status API call failed unexpectedly
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-              example:
-                errors:
-                  - type: "pinelabs_api_error"
-                    msg: "Failed to fetch status from Pine Labs. Please try again later."
-
-  /gateway/cancel_transaction/:
-    post:
-      tags:
-        - Gateway
-      summary: Cancel an in-flight transaction
-      description: |
-        Cancels the transaction via the Pine Labs Plutus cancel API and marks the
-        reconciliation `cancelled`/`error`. Within the free-cancel window
-        (`PAYMENT_RECONCILIATION_FREE_CANCEL_PERIOD_MINUTES`), requires write
-        authorization; after the window, requires destroy authorization.
-      operationId: cancelTransaction
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CancelTransactionRequest'
-            example:
-              payment_reconciliation: "9c0d11ee-aabb-44cc-aa11-bb22cc33dd44"
-      responses:
-        '200':
-          description: Cancelled payment reconciliation
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PaymentReconciliation'
-        '400':
-          description: Missing Pine Labs metadata, or Pine Labs rejected the cancel request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-              examples:
-                metadata_missing:
-                  value:
-                    errors:
-                      - type: "pinelabs_metadata_missing"
-                        msg: "Payment reconciliation is missing Pine Labs transaction metadata"
-                cancel_failed:
-                  value:
-                    errors:
-                      - type: "pinelabs_cancel_failed"
-                        msg: "Cancellation rejected by Pine Labs"
-                        code: 2
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          description: Payment reconciliation or terminal not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ErrorEnvelope'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
 components:
   securitySchemes:
     BearerAuth:
@@ -758,27 +639,6 @@ components:
         status:
           type: string
 
-    PinelabsMeta:
-      type: object
-      description: |
-        Raw Pine Labs / Plutus Cloud transaction metadata, embedded on the
-        `meta` field for gateway responses (upload, status, refresh).
-      properties:
-        pinelabs:
-          type: object
-          properties:
-            terminal_id:
-              type: string
-              example: "TID001"
-            transaction_reference_id:
-              type: string
-              example: "TXN20260428123456"
-            response_code:
-              type: integer
-              example: 0
-            raw_response:
-              type: object
-              additionalProperties: true
 
     PaymentReconciliation:
       type: object
@@ -847,13 +707,6 @@ components:
           allOf:
             - $ref: '#/components/schemas/InvoiceSummary'
           nullable: true
-        meta:
-          allOf:
-            - $ref: '#/components/schemas/PinelabsMeta'
-          nullable: true
-          description: |
-            Present on `transaction_status`, `refresh_transaction_status`, and
-            `upload_transaction` responses; omitted on `cancel_transaction`.
         created_date:
           type: string
           format: date-time
