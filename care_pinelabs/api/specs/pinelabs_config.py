@@ -178,6 +178,6 @@ class PinelabsConfigReadSpec(EMRResource):
         ]
         mapping["pos_terminals"] = [
             PinelabsPosTerminalReadSpec.serialize(t).to_json()
-            for t in obj.pinelabspositerminal_set.all()
+            for t in obj.pinelabsposterminal_set.all()
         ]
         cls.serialize_audit_users(mapping, obj)

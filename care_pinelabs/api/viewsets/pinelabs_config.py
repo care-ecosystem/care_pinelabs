@@ -36,7 +36,7 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
             super()
             .get_queryset()
             .select_related("facility", "created_by", "updated_by")
-            .prefetch_related("payment_method_mappings", "pinelabspositerminal_set")
+            .prefetch_related("payment_method_mappings", "pinelabsposterminal_set")
         )
 
     def _authorize_facility(self, facility):
@@ -69,8 +69,8 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
 
     def _get_device(self, device_id, facility) -> Device:
         device = get_object_or_404(Device, external_id=device_id)
-        if device.care_type != "pos-terminal":
-            raise ValidationError(f"Device {device_id} is not a pos-terminal")
+        # if device.care_type != "pos-terminal":
+        #     raise ValidationError(f"Device {device_id} is not a pos-terminal")
         if device.facility_id != facility.id:
             raise ValidationError(f"Device {device_id} does not belong to this facility")
         return device
