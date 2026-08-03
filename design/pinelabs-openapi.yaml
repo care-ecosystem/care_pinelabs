@@ -194,6 +194,8 @@ paths:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           description: No config exists for this facility
           content:
@@ -258,6 +260,16 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          description: Conflict - one of the given device_ids is already linked to another pos terminal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                errors:
+                  - type: "conflict"
+                    msg: "This device is already linked to another Pinelabs pos terminal"
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -362,7 +374,15 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '500':
-          $ref: '#/components/responses/InternalServerError'
+          description: |
+            Internal server error. Also covers unexpected Plutus upload
+            failures (network error, timeout, non-2xx HTTP response) — unlike
+            `refresh_transaction_status`, this path is not currently mapped
+            to a distinct retryable status code; it surfaces as a plain 500.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
   /gateway/transaction_status/:
     post:
@@ -386,6 +406,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PaymentReconciliation'
+        '400':
+          description: Validation error, e.g. missing or invalid payment_reconciliation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                errors:
+                  - type: "validation_error"
+                    msg: "payment_reconciliation is required"
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -515,7 +545,16 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '500':
-          $ref: '#/components/responses/InternalServerError'
+          description: |
+            Internal server error. Also covers unexpected Plutus cancel
+            failures (network error, timeout, non-2xx HTTP response) — there
+            is no try/except around the Plutus cancel call, so any such
+            failure surfaces as a plain 500, unlike `refresh_transaction_status`'s
+            dedicated 503 handling.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
 
 components:
   securitySchemes:
@@ -595,12 +634,12 @@ components:
               type: string
               format: date-time
               readOnly: true
-              example: "2026-05-19 19:29:35.868682+05:30"
+              example: "2026-05-19T19:29:35.868682+05:30"
             modified_date:
               type: string
               format: date-time
               readOnly: true
-              example: "2026-05-19 19:29:35.868682+05:30"
+              example: "2026-05-19T19:29:35.868682+05:30"
 
     # ===================== Pinelabs Config =====================
     PaymentFlow:
@@ -734,12 +773,12 @@ components:
           type: string
           format: date-time
           readOnly: true
-          example: "2026-05-19 19:29:35.868682+05:30"
+          example: "2026-05-19T19:29:35.868682+05:30"
         modified_date:
           type: string
           format: date-time
           readOnly: true
-          example: "2026-05-19 19:29:35.868682+05:30"
+          example: "2026-05-19T19:29:35.868682+05:30"
 
     # ===================== Pinelabs Pos Terminal =====================
     DeviceSummary:
@@ -816,12 +855,12 @@ components:
           type: string
           format: date-time
           readOnly: true
-          example: "2026-05-19 19:29:35.868682+05:30"
+          example: "2026-05-19T19:29:35.868682+05:30"
         modified_date:
           type: string
           format: date-time
           readOnly: true
-          example: "2026-05-19 19:29:35.868682+05:30"
+          example: "2026-05-19T19:29:35.868682+05:30"
 
     # ===================== Gateway: Requests =====================
     AllowedPaymentMode:
@@ -985,7 +1024,9 @@ components:
           properties:
             terminal_id:
               type: string
-              example: "TID001"
+              format: uuid
+              description: PinelabsPosTerminal id (CARE external_id, not a Pine Labs/Plutus vendor terminal code)
+              example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
             transaction_reference_id:
               type: string
               example: "TXN20260428123456"
@@ -1074,12 +1115,12 @@ components:
           type: string
           format: date-time
           readOnly: true
-          example: "2026-05-19 19:29:35.868682+05:30"
+          example: "2026-05-19T19:29:35.868682+05:30"
         modified_date:
           type: string
           format: date-time
           readOnly: true
-          example: "2026-05-19 19:29:35.868682+05:30"
+          example: "2026-05-19T19:29:35.868682+05:30"
 
     # ===================== Error =====================
     ErrorDetail:
