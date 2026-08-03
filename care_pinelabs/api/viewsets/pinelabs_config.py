@@ -69,8 +69,8 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
 
     def _get_device(self, device_id, facility) -> Device:
         device = get_object_or_404(Device, external_id=device_id)
-        # if device.care_type != "pos-terminal":
-        #     raise ValidationError(f"Device {device_id} is not a pos-terminal")
+        if device.care_type != "pos-terminal":
+            raise ValidationError(f"Device {device_id} is not a pos-terminal")
         if device.facility_id != facility.id:
             raise ValidationError(f"Device {device_id} does not belong to this facility")
         return device
