@@ -1,0 +1,949 @@
+openapi: 3.0.3
+info:
+  title: Pine Labs Integration Plugin API
+  description: |
+    API specification for the Pine Labs Integration Plugin for CARE.
+
+    This plugin allows healthcare facilities to:
+    - Register and manage Pine Labs POS terminals per facility
+    - Upload payment transactions to a Pine Labs terminal (card/UPI/BharatQR)
+    - Poll and refresh transaction status from the Pine Labs Plutus Cloud API
+    - Cancel in-flight transactions
+
+    **Care Plugin Conventions:**
+    - All `id` fields exposed via API are UUIDs (the table's `external_id`).
+      The internal BigInt PK is never exposed.
+    - All FK fields exposed via API are UUIDs (the referenced record's `external_id`).
+    - `PinelabsTerminal` only exposes `created_date` / `modified_date` (no
+      `created_by` / `updated_by`, since it extends the plain `BaseModel`, not
+      `EMRBaseModel`).
+    - Errors use a uniform envelope: `{"errors": [{"type": ..., "msg": ...}]}`,
+      with an optional `code` key for upstream Pine Labs/Plutus response codes.
+
+  version: 1.0.0
+
+servers:
+  - url: https://care.ohc.network/
+    description: Dev server
+  - url: https://care-k3s.digit.org/
+    description: Egov server
+
+tags:
+  - name: Health Check
+    description: Plugin liveness check
+  - name: Pinelabs Terminal
+    description: Manage Pine Labs POS terminals mapped to a facility
+  - name: Gateway
+    description: Upload, poll, refresh, and cancel Pine Labs payment transactions
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ---------- Health Check ----------
+  /health_check/ping/:
+    get:
+      tags:
+        - Health Check
+      summary: Ping
+      description: Basic liveness check for the plugin.
+      operationId: pingHealthCheck
+      security: []
+      responses:
+        '200':
+          description: Plugin is up
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - status
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+              example:
+                status: "ok"
+
+  # ---------- Pinelabs Terminal ----------
+  /pinelabs_terminal/:
+    get:
+      tags:
+        - Pinelabs Terminal
+      summary: List terminals
+      operationId: listPinelabsTerminals
+      parameters:
+        - name: facility
+          in: query
+          description: Filter by facility id (UUID)
+          schema:
+            type: string
+            format: uuid
+        - name: ordering
+          in: query
+          description: Order results by field (prefix with - for descending)
+          schema:
+            type: string
+            enum: [created_date, -created_date, modified_date, -modified_date]
+            example: "-created_date"
+      responses:
+        '200':
+          description: List of Pine Labs terminals
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PinelabsTerminalList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags:
+        - Pinelabs Terminal
+      summary: Create terminal
+      description: Superuser only.
+      operationId: createPinelabsTerminal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PinelabsTerminalWrite'
+            example:
+              facility_id: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+              name: "OPD Counter 1"
+              client_id: "CLIENT001"
+              store_id: "STORE001"
+              is_active: true
+      responses:
+        '201':
+          description: Terminal created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PinelabsTerminal'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /pinelabs_terminal/{id}/:
+    get:
+      tags:
+        - Pinelabs Terminal
+      summary: Get terminal
+      operationId: getPinelabsTerminal
+      parameters:
+        - $ref: '#/components/parameters/TerminalId'
+      responses:
+        '200':
+          description: Terminal details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PinelabsTerminal'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    put:
+      tags:
+        - Pinelabs Terminal
+      summary: Update terminal (full)
+      description: Superuser only. All fields optional; only supplied fields are updated.
+      operationId: updatePinelabsTerminal
+      parameters:
+        - $ref: '#/components/parameters/TerminalId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PinelabsTerminalUpdate'
+      responses:
+        '200':
+          description: Terminal updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PinelabsTerminal'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    patch:
+      tags:
+        - Pinelabs Terminal
+      summary: Update terminal (partial)
+      description: Superuser only. Identical behavior to PUT — all fields optional.
+      operationId: partialUpdatePinelabsTerminal
+      parameters:
+        - $ref: '#/components/parameters/TerminalId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PinelabsTerminalUpdate'
+      responses:
+        '200':
+          description: Terminal updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PinelabsTerminal'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags:
+        - Pinelabs Terminal
+      summary: Delete terminal
+      description: Superuser only. Soft-deletes the terminal (sets `deleted = true`).
+      operationId: deletePinelabsTerminal
+      parameters:
+        - $ref: '#/components/parameters/TerminalId'
+      responses:
+        '204':
+          description: Terminal deleted
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ---------- Gateway ----------
+  /gateway/upload_transaction/:
+    post:
+      tags:
+        - Gateway
+      summary: Upload transaction to Pine Labs terminal
+      description: |
+        Creates a `PaymentReconciliation` (status `draft`, outcome `queued`) and a
+        terminal transaction lock, then pushes the transaction to the Pine Labs
+        Plutus Cloud upload API. A Celery task then polls for the final status
+        asynchronously — poll `/gateway/transaction_status/` to observe updates.
+      operationId: uploadTransaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadTransactionRequest'
+            example:
+              terminal: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+              payment_mode: "10"
+              reconciliation_type: "payment"
+              kind: "online"
+              issuer_type: "patient"
+              method: "debc"
+              account: "b1e7c2a4-9d8f-4e6b-a3c1-7f2d8e5b9c34"
+              target_invoice: "c2f8d3b5-ae90-4f7c-b401-8e3c9d6f1b25"
+              tendered_amount: 500.00
+              returned_amount: 0.00
+              is_credit_note: false
+      responses:
+        '201':
+          description: Transaction uploaded and queued for status polling
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentReconciliation'
+        '400':
+          description: |
+            Validation error, terminal not active, invoice already balanced,
+            amount exceeds invoice total, terminal/invoice/account busy with
+            another transaction, or the Pine Labs upload itself was rejected
+            (`type: pinelabs_upload_failed`, includes upstream `code`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              examples:
+                validation_error:
+                  value:
+                    errors:
+                      - type: "validation_error"
+                        msg: "returned_amount must be less than tendered_amount"
+                pinelabs_upload_failed:
+                  value:
+                    errors:
+                      - type: "pinelabs_upload_failed"
+                        msg: "Transaction declined by Pine Labs"
+                        code: 1
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Not authorized to write payment reconciliations in this facility/location
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                errors:
+                  - type: "permission_denied"
+                    msg: "You do not have permission to perform this action"
+        '404':
+          description: Terminal, account, invoice, or location not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /gateway/transaction_status/:
+    post:
+      tags:
+        - Gateway
+      summary: Get cached transaction status
+      description: Returns the last-known status of a payment reconciliation without calling Pine Labs.
+      operationId: getTransactionStatus
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionStatusRequest'
+            example:
+              payment_reconciliation: "9c0d11ee-aabb-44cc-aa11-bb22cc33dd44"
+      responses:
+        '200':
+          description: Payment reconciliation with embedded Pine Labs meta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentReconciliation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Not authorized to read payment reconciliations in this facility
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /gateway/refresh_transaction_status/:
+    post:
+      tags:
+        - Gateway
+      summary: Refresh transaction status from Pine Labs
+      description: |
+        Actively polls the Pine Labs Plutus GetStatus API and updates the
+        reconciliation record if the upstream status has changed.
+      operationId: refreshTransactionStatus
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransactionStatusRequest'
+      responses:
+        '200':
+          description: Refreshed payment reconciliation with embedded Pine Labs meta
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaymentReconciliation'
+                  - type: object
+                    required:
+                      - status_changed
+                    properties:
+                      status_changed:
+                        type: boolean
+                        description: Whether the status differed from the previously cached value
+              example:
+                status_changed: true
+        '400':
+          description: Reconciliation is missing Pine Labs metadata (terminal_id / transaction_reference_id)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                errors:
+                  - type: "pinelabs_metadata_missing"
+                    msg: "Payment reconciliation is missing Pine Labs transaction metadata"
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          description: Pine Labs status API call failed unexpectedly
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              example:
+                errors:
+                  - type: "pinelabs_api_error"
+                    msg: "Failed to fetch status from Pine Labs. Please try again later."
+
+  /gateway/cancel_transaction/:
+    post:
+      tags:
+        - Gateway
+      summary: Cancel an in-flight transaction
+      description: |
+        Cancels the transaction via the Pine Labs Plutus cancel API and marks the
+        reconciliation `cancelled`/`error`. Within the free-cancel window
+        (`PAYMENT_RECONCILIATION_FREE_CANCEL_PERIOD_MINUTES`), requires write
+        authorization; after the window, requires destroy authorization.
+      operationId: cancelTransaction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelTransactionRequest'
+            example:
+              payment_reconciliation: "9c0d11ee-aabb-44cc-aa11-bb22cc33dd44"
+      responses:
+        '200':
+          description: Cancelled payment reconciliation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentReconciliation'
+        '400':
+          description: Missing Pine Labs metadata, or Pine Labs rejected the cancel request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+              examples:
+                metadata_missing:
+                  value:
+                    errors:
+                      - type: "pinelabs_metadata_missing"
+                        msg: "Payment reconciliation is missing Pine Labs transaction metadata"
+                cancel_failed:
+                  value:
+                    errors:
+                      - type: "pinelabs_cancel_failed"
+                        msg: "Cancellation rejected by Pine Labs"
+                        code: 2
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Payment reconciliation or terminal not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token for authentication
+
+  parameters:
+    TerminalId:
+      name: id
+      in: path
+      required: true
+      description: Pinelabs terminal id (UUID, external_id)
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    # ===================== Pinelabs Terminal =====================
+    PinelabsTerminalWrite:
+      type: object
+      required:
+        - facility_id
+        - name
+        - client_id
+        - store_id
+      properties:
+        facility_id:
+          type: string
+          format: uuid
+          description: CARE facility id reference
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: "OPD Counter 1"
+        client_id:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: "CLIENT001"
+        store_id:
+          type: string
+          minLength: 1
+          maxLength: 255
+          example: "STORE001"
+        is_active:
+          type: boolean
+          default: true
+
+    PinelabsTerminalUpdate:
+      type: object
+      description: All fields optional; only supplied fields are updated.
+      properties:
+        facility_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        client_id:
+          type: string
+          minLength: 1
+          maxLength: 255
+        store_id:
+          type: string
+          minLength: 1
+          maxLength: 255
+        is_active:
+          type: boolean
+
+    PinelabsTerminal:
+      type: object
+      required:
+        - id
+        - facility_id
+        - name
+        - client_id
+        - store_id
+        - is_active
+        - created_date
+        - modified_date
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        facility_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: "OPD Counter 1"
+        client_id:
+          type: string
+          example: "CLIENT001"
+        store_id:
+          type: string
+          example: "STORE001"
+        is_active:
+          type: boolean
+          default: true
+        created_date:
+          type: string
+          format: date-time
+          readOnly: true
+          example: "2026-05-19 19:29:35.868682+05:30"
+        modified_date:
+          type: string
+          format: date-time
+          readOnly: true
+          example: "2026-05-19 19:29:35.868682+05:30"
+
+    PinelabsTerminalList:
+      type: object
+      required:
+        - count
+        - results
+      properties:
+        count:
+          type: integer
+        next:
+          type: string
+          format: uri
+          nullable: true
+        previous:
+          type: string
+          format: uri
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/PinelabsTerminal'
+
+    # ===================== Gateway: Requests =====================
+    AllowedPaymentMode:
+      type: string
+      enum: ["1", "10", "11"]
+      description: |
+        Pine Labs payment mode. `1` = Card, `10` = UPI, `11` = Bharat QR.
+      default: "10"
+
+    ReconciliationType:
+      type: string
+      enum: [payment, adjustment, advance]
+
+    ReconciliationKind:
+      type: string
+      enum: [deposit, periodic_payment, online, kiosk]
+
+    ReconciliationIssuerType:
+      type: string
+      enum: [patient, insurer]
+
+    ReconciliationMethod:
+      type: string
+      enum: [cash, ccca, cchk, cdac, chck, ddpo, debc]
+      description: |
+        Payment method. `ccca`=Credit Card, `cchk`=Cheque, `cdac`=Debit Card
+        (ACH), `chck`=Cheque(alt), `ddpo`=Demand Draft/PO, `debc`=Debit Card.
+
+    ReconciliationStatus:
+      type: string
+      enum: [draft, entered, cancelled, error]
+
+    ReconciliationOutcome:
+      type: string
+      enum: [queued, complete, error]
+
+    UploadTransactionRequest:
+      type: object
+      description: |
+        Extends the core payment reconciliation write payload with a Pine Labs
+        terminal reference and payment mode. `status` is always forced to
+        `draft` and `outcome` to `queued` server-side, regardless of input.
+      required:
+        - terminal
+        - reconciliation_type
+        - kind
+        - issuer_type
+        - method
+        - account
+        - tendered_amount
+        - returned_amount
+      properties:
+        terminal:
+          type: string
+          format: uuid
+          description: PinelabsTerminal id to upload the transaction to
+        payment_mode:
+          allOf:
+            - $ref: '#/components/schemas/AllowedPaymentMode'
+        reconciliation_type:
+          $ref: '#/components/schemas/ReconciliationType'
+        kind:
+          $ref: '#/components/schemas/ReconciliationKind'
+        issuer_type:
+          $ref: '#/components/schemas/ReconciliationIssuerType'
+        disposition:
+          type: string
+          nullable: true
+        payment_datetime:
+          type: string
+          format: date-time
+          nullable: true
+        method:
+          $ref: '#/components/schemas/ReconciliationMethod'
+        reference_number:
+          type: string
+          nullable: true
+        authorization:
+          type: string
+          nullable: true
+        note:
+          type: string
+          nullable: true
+        target_invoice:
+          type: string
+          format: uuid
+          nullable: true
+          description: Invoice id to apply this payment against
+        account:
+          type: string
+          format: uuid
+          description: Patient/insurer account id
+        tendered_amount:
+          type: number
+          format: decimal
+          example: 500.00
+        returned_amount:
+          type: number
+          format: decimal
+          description: Must be less than tendered_amount
+          example: 0.00
+        is_credit_note:
+          type: boolean
+          default: false
+        location:
+          type: string
+          format: uuid
+          nullable: true
+
+    TransactionStatusRequest:
+      type: object
+      required:
+        - payment_reconciliation
+      properties:
+        payment_reconciliation:
+          type: string
+          format: uuid
+          description: PaymentReconciliation id
+
+    CancelTransactionRequest:
+      type: object
+      required:
+        - payment_reconciliation
+      properties:
+        payment_reconciliation:
+          type: string
+          format: uuid
+
+    # ===================== Gateway: Response =====================
+    AccountSummary:
+      type: object
+      description: Nested account reference (trimmed)
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+
+    InvoiceSummary:
+      type: object
+      description: Nested invoice reference (trimmed)
+      nullable: true
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+
+    PinelabsMeta:
+      type: object
+      description: |
+        Raw Pine Labs / Plutus Cloud transaction metadata, embedded on the
+        `meta` field for gateway responses (upload, status, refresh).
+      properties:
+        pinelabs:
+          type: object
+          properties:
+            terminal_id:
+              type: string
+              example: "TID001"
+            transaction_reference_id:
+              type: string
+              example: "TXN20260428123456"
+            response_code:
+              type: integer
+              example: 0
+            raw_response:
+              type: object
+              additionalProperties: true
+
+    PaymentReconciliation:
+      type: object
+      required:
+        - id
+        - reconciliation_type
+        - status
+        - kind
+        - issuer_type
+        - outcome
+        - method
+        - tendered_amount
+        - returned_amount
+        - is_credit_note
+        - account
+        - created_date
+        - modified_date
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        reconciliation_type:
+          $ref: '#/components/schemas/ReconciliationType'
+        status:
+          $ref: '#/components/schemas/ReconciliationStatus'
+        kind:
+          $ref: '#/components/schemas/ReconciliationKind'
+        issuer_type:
+          $ref: '#/components/schemas/ReconciliationIssuerType'
+        outcome:
+          $ref: '#/components/schemas/ReconciliationOutcome'
+        disposition:
+          type: string
+          nullable: true
+        payment_datetime:
+          type: string
+          format: date-time
+          nullable: true
+        method:
+          $ref: '#/components/schemas/ReconciliationMethod'
+        reference_number:
+          type: string
+          nullable: true
+        authorization:
+          type: string
+          nullable: true
+        note:
+          type: string
+          nullable: true
+        amount:
+          type: number
+          format: decimal
+          description: Computed server-side as tendered_amount minus returned_amount
+        tendered_amount:
+          type: number
+          format: decimal
+        returned_amount:
+          type: number
+          format: decimal
+        is_credit_note:
+          type: boolean
+        account:
+          $ref: '#/components/schemas/AccountSummary'
+        target_invoice:
+          allOf:
+            - $ref: '#/components/schemas/InvoiceSummary'
+          nullable: true
+        meta:
+          allOf:
+            - $ref: '#/components/schemas/PinelabsMeta'
+          nullable: true
+          description: |
+            Present on `transaction_status`, `refresh_transaction_status`, and
+            `upload_transaction` responses; omitted on `cancel_transaction`.
+        created_date:
+          type: string
+          format: date-time
+          readOnly: true
+          example: "2026-05-19 19:29:35.868682+05:30"
+        modified_date:
+          type: string
+          format: date-time
+          readOnly: true
+          example: "2026-05-19 19:29:35.868682+05:30"
+
+    # ===================== Error =====================
+    ErrorDetail:
+      type: object
+      required:
+        - type
+        - msg
+      properties:
+        type:
+          type: string
+          description: Machine-readable error type
+          example: "validation_error"
+        msg:
+          type: string
+        code:
+          type: integer
+          description: Upstream Pine Labs/Plutus response code, present for pinelabs_* error types
+
+    ErrorEnvelope:
+      type: object
+      required:
+        - errors
+      properties:
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ErrorDetail'
+
+  responses:
+    BadRequest:
+      description: Bad Request - Invalid input parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            errors:
+              - type: "validation_error"
+                msg: "This field is required"
+
+    Unauthorized:
+      description: Unauthorized - Invalid or missing authentication token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            errors:
+              - type: "not_authenticated"
+                msg: "Authentication credentials were not provided"
+
+    Forbidden:
+      description: Forbidden - authenticated but not permitted to perform this action
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            errors:
+              - type: "permission_denied"
+                msg: "You do not have permission to perform this action"
+
+    NotFound:
+      description: Not Found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            errors:
+              - type: "object_not_found"
+                msg: "Resource not found"
+
+    InternalServerError:
+      description: Internal Server Error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+          example:
+            errors:
+              - type: "internal_error"
+                msg: "Internal server error occurred"
