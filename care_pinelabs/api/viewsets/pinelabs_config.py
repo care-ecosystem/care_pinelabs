@@ -205,6 +205,8 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                     instance.save(
                         update_fields=[*update_fields, "updated_by", "modified_date"]
                     )
+        except _ConflictError as e:
+            return self._conflict(str(e))
         except IntegrityError:
             return self._conflict(
                 "This device is already linked to another Pinelabs pos terminal"
@@ -268,10 +270,16 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                 continue
 
             device = new_devices_by_id[spec.device_id]
-            other_terminal = PinelabsPosTerminal._base_manager.filter(
-                device=device
-            ).first()
+            other_terminal = (
+                PinelabsPosTerminal._base_manager.select_for_update()
+                .filter(device=device)
+                .first()
+            )
             if other_terminal:
+                if not other_terminal.deleted:
+                    raise _ConflictError(
+                        "This device is already linked to another Pinelabs pos terminal"
+                    )
                 other_terminal.config = config
                 other_terminal.deleted = False
                 other_terminal.updated_by = user

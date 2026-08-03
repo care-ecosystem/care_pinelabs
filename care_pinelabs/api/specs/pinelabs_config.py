@@ -25,6 +25,10 @@ def _validate_payment_method_mappings(mappings):
     if len(methods) != len(set(methods)):
         msg = "Duplicate pinelabs_method within the same config"
         raise ValueError(msg)
+    ids = [m.id for m in mappings if m.id]
+    if len(ids) != len(set(ids)):
+        msg = "Duplicate payment_method_mapping id within the same config"
+        raise ValueError(msg)
     return mappings
 
 
