@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import UUID4, field_validator, model_validator
+from pydantic import UUID4, field_validator
 
 from care.emr.models.device import Device
 from care.emr.resources.base import EMRResource
@@ -13,6 +13,29 @@ from care_pinelabs.models.pinelabs_payment_method_mapping import (
     PinelabsPaymentModeChoices,
 )
 from care_pinelabs.models.pinelabs_pos_terminal import PinelabsPosTerminal
+
+
+def _validate_payment_method_mappings(mappings):
+    if not mappings:
+        return mappings
+    if sum(1 for m in mappings if m.is_default) > 1:
+        msg = "At most one payment_method_mapping may be marked is_default = true"
+        raise ValueError(msg)
+    methods = [m.pinelabs_method for m in mappings]
+    if len(methods) != len(set(methods)):
+        msg = "Duplicate pinelabs_method within the same config"
+        raise ValueError(msg)
+    return mappings
+
+
+def _validate_pos_terminals(terminals):
+    if not terminals:
+        return terminals
+    device_ids = [t.device_id for t in terminals]
+    if len(device_ids) != len(set(device_ids)):
+        msg = "Duplicate device_id within the same config"
+        raise ValueError(msg)
+    return terminals
 
 
 # ===================== Payment Method Mapping (embedded) =====================
@@ -93,25 +116,35 @@ class PinelabsConfigCreateSpec(EMRResource):
     @field_validator("payment_method_mappings")
     @classmethod
     def validate_payment_method_mappings(cls, mappings):
-        if not mappings:
-            return mappings
-        if sum(1 for m in mappings if m.is_default) > 1:
-            msg = "At most one payment_method_mapping may be marked is_default = true"
-            raise ValueError(msg)
-        methods = [m.pinelabs_method for m in mappings]
-        if len(methods) != len(set(methods)):
-            msg = "Duplicate pinelabs_method within the same config"
-            raise ValueError(msg)
-        return mappings
+        return _validate_payment_method_mappings(mappings)
 
-    @model_validator(mode="after")
-    def validate_pos_terminals(self):
-        if self.pos_terminals:
-            device_ids = [terminal.device_id for terminal in self.pos_terminals]
-            if len(device_ids) != len(set(device_ids)):
-                msg = "Duplicate device_id within the same config"
-                raise ValueError(msg)
-        return self
+    @field_validator("pos_terminals")
+    @classmethod
+    def validate_pos_terminals(cls, terminals):
+        return _validate_pos_terminals(terminals)
+
+
+class PinelabsConfigUpdateSpec(EMRResource):
+    __model__ = PinelabsConfig
+    __exclude__ = ["facility"]
+
+    default_payment_flow: PaymentFlowChoices | None = None
+    allow_advance_payment: bool | None = None
+    allow_partial_payment: bool | None = None
+    pinelabs_merchant_id: str | None = None
+    pinelabs_security_token: str | None = None
+    payment_method_mappings: list[PinelabsPaymentMethodMappingWriteSpec] | None = None
+    pos_terminals: list[PinelabsPosTerminalWriteSpec] | None = None
+
+    @field_validator("payment_method_mappings")
+    @classmethod
+    def validate_payment_method_mappings(cls, mappings):
+        return _validate_payment_method_mappings(mappings)
+
+    @field_validator("pos_terminals")
+    @classmethod
+    def validate_pos_terminals(cls, terminals):
+        return _validate_pos_terminals(terminals)
 
 
 class PinelabsConfigReadSpec(EMRResource):
