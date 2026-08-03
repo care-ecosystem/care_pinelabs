@@ -1,9 +1,6 @@
 from django.db import models
 
 from care.emr.models.base import BaseModel
-from care.emr.resources.payment_reconciliation.spec import (
-    PaymentReconciliationPaymentMethodOptions as CarePaymentMethod,
-)
 from care_pinelabs.models.pinelabs_config import PinelabsConfig
 
 
@@ -20,7 +17,7 @@ class PinelabsPaymentMethodMapping(BaseModel):
         on_delete=models.CASCADE,
         related_name="payment_method_mappings",
     )
-    care_method = models.CharField(max_length=255, choices=CarePaymentMethod)
+    care_method = models.CharField(max_length=255)
     pinelabs_method = models.CharField(
         max_length=255, choices=PinelabsPaymentModeChoices.choices
     )
