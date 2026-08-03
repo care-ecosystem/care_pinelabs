@@ -66,7 +66,7 @@ class Migration(migrations.Migration):
                 ('created_date', models.DateTimeField(auto_now_add=True, db_index=True, null=True)),
                 ('modified_date', models.DateTimeField(auto_now=True, db_index=True, null=True)),
                 ('deleted', models.BooleanField(db_index=True, default=False)),
-                ('care_method', models.CharField(choices=[('cash', 'Cash'), ('ccca', 'Credit Card'), ('cchk', 'Cheque'), ('cdac', 'Debit Card (ACH)'), ('chck', 'Cheque'), ('ddpo', 'Demand Draft/PO'), ('debc', 'Debit Card')], max_length=255)),
+                ('care_method', models.CharField(max_length=255)),
                 ('pinelabs_method', models.CharField(choices=[('1', 'Card'), ('2', 'Cash'), ('10', 'UPI Sale'), ('11', 'UPI Bharat QR')], max_length=255)),
                 ('is_default', models.BooleanField(default=False)),
                 ('config', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='payment_method_mappings', to='care_pinelabs.pinelabsconfig')),
