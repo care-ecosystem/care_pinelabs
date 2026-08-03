@@ -1,4 +1,4 @@
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -19,6 +19,10 @@ from care_pinelabs.models.pinelabs_payment_method_mapping import (
     PinelabsPaymentMethodMapping,
 )
 from care_pinelabs.models.pinelabs_pos_terminal import PinelabsPosTerminal
+
+
+class _ConflictError(Exception):
+    pass
 
 
 @extend_schema(tags=["Pinelabs: Pinelabs Config"])
@@ -63,10 +67,12 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
             status=status.HTTP_409_CONFLICT,
         )
 
-    def _get_device(self, device_id) -> Device:
+    def _get_device(self, device_id, facility) -> Device:
         device = get_object_or_404(Device, external_id=device_id)
         if device.care_type != "pos-terminal":
             raise ValidationError(f"Device {device_id} is not a pos-terminal")
+        if device.facility_id != facility.id:
+            raise ValidationError(f"Device {device_id} does not belong to this facility")
         return device
 
     @extend_schema(request=PinelabsConfigCreateSpec, responses=PinelabsConfigReadSpec)
@@ -75,45 +81,60 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
         facility = get_object_or_404(Facility, external_id=request_data.facility_id)
         self._authorize_facility(facility)
 
-        if PinelabsConfig.objects.filter(facility=facility).exists():
-            return self._conflict("Pinelabs config already exists for this facility")
+        devices = [
+            self._get_device(pos_terminal.device_id, facility)
+            for pos_terminal in request_data.pos_terminals or []
+        ]
 
-        devices = []
-        for pos_terminal in request_data.pos_terminals or []:
-            device = self._get_device(pos_terminal.device_id)
-            if PinelabsPosTerminal.objects.filter(device=device).exists():
-                return self._conflict(
-                    "This device is already linked to another Pinelabs pos terminal"
-                )
-            devices.append(device)
+        try:
+            with transaction.atomic():
+                existing_config = PinelabsConfig._base_manager.filter(
+                    facility=facility
+                ).first()
+                if existing_config and not existing_config.deleted:
+                    raise _ConflictError(
+                        "Pinelabs config already exists for this facility"
+                    )
 
-        with transaction.atomic():
-            config = PinelabsConfig.objects.create(
-                facility=facility,
-                default_payment_flow=request_data.default_payment_flow,
-                allow_advance_payment=request_data.allow_advance_payment,
-                allow_partial_payment=request_data.allow_partial_payment,
-                pinelabs_merchant_id=request_data.pinelabs_merchant_id,
-                pinelabs_security_token=request_data.pinelabs_security_token,
-                created_by=request.user,
-                updated_by=request.user,
+                config = existing_config or PinelabsConfig(facility=facility)
+                config.deleted = False
+                config.default_payment_flow = request_data.default_payment_flow
+                config.allow_advance_payment = request_data.allow_advance_payment
+                config.allow_partial_payment = request_data.allow_partial_payment
+                config.pinelabs_merchant_id = request_data.pinelabs_merchant_id
+                config.pinelabs_security_token = request_data.pinelabs_security_token
+                config.created_by = request.user
+                config.updated_by = request.user
+                config.save()
+
+                for mapping in request_data.payment_method_mappings or []:
+                    PinelabsPaymentMethodMapping.objects.create(
+                        config=config,
+                        care_method=mapping.care_method,
+                        pinelabs_method=mapping.pinelabs_method,
+                        is_default=mapping.is_default,
+                    )
+
+                for device in devices:
+                    existing_terminal = PinelabsPosTerminal._base_manager.filter(
+                        device=device
+                    ).first()
+                    if existing_terminal and not existing_terminal.deleted:
+                        raise _ConflictError(
+                            "This device is already linked to another Pinelabs pos terminal"
+                        )
+                    terminal = existing_terminal or PinelabsPosTerminal(device=device)
+                    terminal.config = config
+                    terminal.deleted = False
+                    terminal.created_by = request.user
+                    terminal.updated_by = request.user
+                    terminal.save()
+        except _ConflictError as e:
+            return self._conflict(str(e))
+        except IntegrityError:
+            return self._conflict(
+                "Conflicting Pinelabs config or pos terminal link (concurrent request)"
             )
-
-            for mapping in request_data.payment_method_mappings or []:
-                PinelabsPaymentMethodMapping.objects.create(
-                    config=config,
-                    care_method=mapping.care_method,
-                    pinelabs_method=mapping.pinelabs_method,
-                    is_default=mapping.is_default,
-                )
-
-            for device in devices:
-                PinelabsPosTerminal.objects.create(
-                    config=config,
-                    device=device,
-                    created_by=request.user,
-                    updated_by=request.user,
-                )
 
         config = self.get_queryset().get(pk=config.pk)
         return Response(
@@ -137,7 +158,7 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
             for pos_terminal in request_data.pos_terminals:
                 if pos_terminal.device_id in linked_device_ids:
                     continue
-                device = self._get_device(pos_terminal.device_id)
+                device = self._get_device(pos_terminal.device_id, instance.facility)
                 if (
                     PinelabsPosTerminal.objects.filter(device=device)
                     .exclude(config=instance)
