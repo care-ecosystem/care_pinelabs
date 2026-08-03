@@ -169,39 +169,46 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                     )
                 new_devices_by_id[pos_terminal.device_id] = device
 
-        with transaction.atomic():
-            update_fields = []
-            for field in (
-                "default_payment_flow",
-                "allow_advance_payment",
-                "allow_partial_payment",
-                "pinelabs_merchant_id",
-                "pinelabs_security_token",
-            ):
-                value = getattr(request_data, field)
-                if value is not None:
-                    setattr(instance, field, value)
-                    update_fields.append(field)
-            touched = bool(update_fields)
+        try:
+            with transaction.atomic():
+                update_fields = []
+                for field in (
+                    "default_payment_flow",
+                    "allow_advance_payment",
+                    "allow_partial_payment",
+                    "pinelabs_merchant_id",
+                    "pinelabs_security_token",
+                ):
+                    value = getattr(request_data, field)
+                    if value is not None:
+                        setattr(instance, field, value)
+                        update_fields.append(field)
+                touched = bool(update_fields)
 
-            if request_data.payment_method_mappings is not None:
-                self._replace_payment_method_mappings(
-                    instance, request_data.payment_method_mappings
-                )
-                touched = True
+                if request_data.payment_method_mappings is not None:
+                    self._replace_payment_method_mappings(
+                        instance, request_data.payment_method_mappings
+                    )
+                    touched = True
 
-            if request_data.pos_terminals is not None:
-                self._replace_pos_terminals(
-                    instance,
-                    request_data.pos_terminals,
-                    new_devices_by_id,
-                    request.user,
-                )
-                touched = True
+                if request_data.pos_terminals is not None:
+                    self._replace_pos_terminals(
+                        instance,
+                        request_data.pos_terminals,
+                        new_devices_by_id,
+                        request.user,
+                    )
+                    touched = True
 
-            if touched:
-                instance.updated_by = request.user
-                instance.save(update_fields=[*update_fields, "updated_by", "modified_date"])
+                if touched:
+                    instance.updated_by = request.user
+                    instance.save(
+                        update_fields=[*update_fields, "updated_by", "modified_date"]
+                    )
+        except IntegrityError:
+            return self._conflict(
+                "This device is already linked to another Pinelabs pos terminal"
+            )
 
         instance = self.get_queryset().get(pk=instance.pk)
         return Response(PinelabsConfigReadSpec.serialize(instance).to_json())
@@ -212,18 +219,10 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
             m.external_id: m
             for m in PinelabsPaymentMethodMapping._base_manager.filter(config=config)
         }
-        submitted_ids = {spec.id for spec in mappings_spec if spec.id}
-
-        for external_id, mapping in existing_by_id.items():
-            if not mapping.deleted and external_id not in submitted_ids:
+        for mapping in existing_by_id.values():
+            if not mapping.deleted:
                 mapping.deleted = True
                 mapping.save(update_fields=["deleted"])
-
-        # Clear defaults up front so setting the new default never collides
-        # with a still-active old default under the partial unique index.
-        PinelabsPaymentMethodMapping._base_manager.filter(
-            config=config, is_default=True
-        ).update(is_default=False)
 
         for spec in mappings_spec:
             if spec.id:
@@ -266,10 +265,21 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                     existing.deleted = False
                     existing.updated_by = user
                     existing.save(update_fields=["deleted", "updated_by"])
+                continue
+
+            device = new_devices_by_id[spec.device_id]
+            other_terminal = PinelabsPosTerminal._base_manager.filter(
+                device=device
+            ).first()
+            if other_terminal:
+                other_terminal.config = config
+                other_terminal.deleted = False
+                other_terminal.updated_by = user
+                other_terminal.save(update_fields=["config", "deleted", "updated_by"])
             else:
                 PinelabsPosTerminal.objects.create(
                     config=config,
-                    device=new_devices_by_id[spec.device_id],
+                    device=device,
                     created_by=user,
                     updated_by=user,
                 )

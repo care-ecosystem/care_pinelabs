@@ -33,7 +33,7 @@ class Migration(migrations.Migration):
                 ('pinelabs_merchant_id', models.CharField(max_length=255)),
                 ('pinelabs_security_token', care_pinelabs.utils.encrypted_field.EncryptedCharField()),
                 ('created_by', models.ForeignKey(blank=True, default=None, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='%(app_label)s_%(class)s_created_by', to=settings.AUTH_USER_MODEL)),
-                ('facility', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, to='facility.facility')),
+                ('facility', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='facility.facility')),
                 ('updated_by', models.ForeignKey(blank=True, default=None, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='%(app_label)s_%(class)s_updated_by', to=settings.AUTH_USER_MODEL)),
             ],
             options={
@@ -52,7 +52,7 @@ class Migration(migrations.Migration):
                 ('meta', models.JSONField(default=dict)),
                 ('config', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='care_pinelabs.pinelabsconfig')),
                 ('created_by', models.ForeignKey(blank=True, default=None, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='%(app_label)s_%(class)s_created_by', to=settings.AUTH_USER_MODEL)),
-                ('device', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, to='emr.device')),
+                ('device', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='emr.device')),
                 ('updated_by', models.ForeignKey(blank=True, default=None, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='%(app_label)s_%(class)s_updated_by', to=settings.AUTH_USER_MODEL)),
             ],
             options={
@@ -75,5 +75,13 @@ class Migration(migrations.Migration):
             options={
                 'constraints': [models.UniqueConstraint(condition=models.Q(('deleted', False)), fields=('config', 'pinelabs_method'), name='unique_care_method_per_config'), models.UniqueConstraint(condition=models.Q(('deleted', False), ('is_default', True)), fields=('config',), name='unique_default_payment_method_per_config')],
             },
+        ),
+        migrations.AddConstraint(
+            model_name='pinelabsconfig',
+            constraint=models.UniqueConstraint(condition=models.Q(('deleted', False)), fields=('facility',), name='unique_active_facility_per_pinelabs_config'),
+        ),
+        migrations.AddConstraint(
+            model_name='pinelabsposterminal',
+            constraint=models.UniqueConstraint(condition=models.Q(('deleted', False)), fields=('device',), name='unique_active_device_per_pos_terminal'),
         ),
     ]
