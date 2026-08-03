@@ -107,13 +107,9 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                 config.updated_by = request.user
                 config.save()
 
-                for mapping in request_data.payment_method_mappings or []:
-                    PinelabsPaymentMethodMapping.objects.create(
-                        config=config,
-                        care_method=mapping.care_method,
-                        pinelabs_method=mapping.pinelabs_method,
-                        is_default=mapping.is_default,
-                    )
+                self._replace_payment_method_mappings(
+                    config, request_data.payment_method_mappings or []
+                )
 
                 for device in devices:
                     existing_terminal = PinelabsPosTerminal._base_manager.filter(
@@ -226,11 +222,21 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                 mapping.deleted = True
                 mapping.save(update_fields=["deleted"])
 
+        referenced_ids = {spec.id for spec in mappings_spec if spec.id}
+        existing_by_method = {}
+        for external_id, mapping in existing_by_id.items():
+            if external_id not in referenced_ids:
+                existing_by_method.setdefault(mapping.pinelabs_method, mapping)
+
         for spec in mappings_spec:
             if spec.id:
                 mapping = existing_by_id.get(spec.id)
                 if mapping is None:
                     raise ValidationError(f"payment_method_mapping {spec.id} not found")
+            else:
+                mapping = existing_by_method.pop(spec.pinelabs_method, None)
+
+            if mapping:
                 mapping.care_method = spec.care_method
                 mapping.pinelabs_method = spec.pinelabs_method
                 mapping.is_default = spec.is_default
