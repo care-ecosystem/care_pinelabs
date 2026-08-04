@@ -65,7 +65,7 @@ class PinelabsPaymentMethodMappingReadSpec(EMRResource):
     modified_date: datetime
 
 
-# ===================== Pos Terminal (embedded) =====================
+# ===================== POS Terminal (embedded) =====================
 class PinelabsPosTerminalWriteSpec(EMRResource):
     __model__ = PinelabsPosTerminal
     __exclude__ = ["config", "device"]
@@ -88,7 +88,6 @@ class PinelabsPosTerminalReadSpec(EMRResource):
     __exclude__ = ["config", "device"]
 
     id: UUID4 | None = None
-    config_id: UUID4 | None = None
     device: dict | None = None
     created_by: dict | None = None
     updated_by: dict | None = None
@@ -98,7 +97,6 @@ class PinelabsPosTerminalReadSpec(EMRResource):
     @classmethod
     def perform_extra_serialization(cls, mapping, obj):
         mapping["id"] = obj.external_id
-        mapping["config_id"] = obj.config.external_id
         mapping["device"] = DeviceSummarySpec.serialize(obj.device).to_json()
         cls.serialize_audit_users(mapping, obj)
 
@@ -162,7 +160,6 @@ class PinelabsConfigReadSpec(EMRResource):
     allow_partial_payment: bool
     pinelabs_merchant_id: str
     payment_method_mappings: list[dict] = []
-    pos_terminals: list[dict] = []
     created_by: dict | None = None
     updated_by: dict | None = None
     created_date: datetime
@@ -175,9 +172,5 @@ class PinelabsConfigReadSpec(EMRResource):
         mapping["payment_method_mappings"] = [
             PinelabsPaymentMethodMappingReadSpec.serialize(m).to_json()
             for m in obj.payment_method_mappings.all()
-        ]
-        mapping["pos_terminals"] = [
-            PinelabsPosTerminalReadSpec.serialize(t).to_json()
-            for t in obj.pinelabsposterminal_set.all()
         ]
         cls.serialize_audit_users(mapping, obj)

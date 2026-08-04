@@ -14,6 +14,7 @@ from care_pinelabs.api.specs.pinelabs_config import (
     PinelabsConfigCreateSpec,
     PinelabsConfigReadSpec,
     PinelabsConfigUpdateSpec,
+    PinelabsPosTerminalReadSpec,
     PinelabsPosTerminalsUpdateSpec,
 )
 from care_pinelabs.models.pinelabs_config import PinelabsConfig
@@ -38,7 +39,7 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
             super()
             .get_queryset()
             .select_related("facility", "created_by", "updated_by")
-            .prefetch_related("payment_method_mappings", "pinelabsposterminal_set")
+            .prefetch_related("payment_method_mappings")
         )
 
     def _authorize_facility(self, facility):
@@ -155,17 +156,29 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
             return self._conflict(str(e))
         except IntegrityError:
             return self._conflict(
-                "This device is already linked to another Pinelabs pos terminal"
+                "This device is already linked to another Pinelabs POS terminal"
             )
 
         instance = self.get_queryset().get(pk=instance.pk)
         return Response(PinelabsConfigReadSpec.serialize(instance).to_json())
 
+    @extend_schema(responses=PinelabsPosTerminalReadSpec(many=True))
+    @action(detail=True, methods=["get"], url_path="pos-terminals")
+    def pos_terminals(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self._authorize_facility(instance.facility)
+        terminals = PinelabsPosTerminal.objects.filter(config=instance).select_related(
+            "device", "created_by", "updated_by"
+        )
+        return Response(
+            [PinelabsPosTerminalReadSpec.serialize(t).to_json() for t in terminals]
+        )
+
     @extend_schema(
         request=PinelabsPosTerminalsUpdateSpec, responses=PinelabsConfigReadSpec
     )
-    @action(detail=True, methods=["patch"], url_path="pos-terminals")
-    def pos_terminals(self, request, *args, **kwargs):
+    @pos_terminals.mapping.patch
+    def _update_pos_terminals(self, request, *args, **kwargs):
         instance = self.get_object()
         self._authorize_facility(instance.facility)
         request_data = PinelabsPosTerminalsUpdateSpec(**request.data)
@@ -186,7 +199,8 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                 .exists()
             ):
                 return self._conflict(
-                    "This device is already linked to another Pinelabs pos terminal"
+                    f"Device {device.registered_name} is already linked to "
+                    "another Pinelabs POS terminal"
                 )
             new_devices_by_id[pos_terminal.device_id] = device
 
@@ -199,7 +213,7 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
             return self._conflict(str(e))
         except IntegrityError:
             return self._conflict(
-                "This device is already linked to another Pinelabs pos terminal"
+                "This device is already linked to another Pinelabs POS terminal"
             )
 
         instance = self.get_queryset().get(pk=instance.pk)
@@ -278,7 +292,8 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
             if other_terminal:
                 if not other_terminal.deleted:
                     raise _ConflictError(
-                        "This device is already linked to another Pinelabs pos terminal"
+                        f"Device {device.registered_name} is already linked "
+                        "to another Pinelabs POS terminal"
                     )
                 other_terminal.config = config
                 other_terminal.deleted = False
