@@ -257,28 +257,6 @@ paths:
         '500':
           $ref: '#/components/responses/InternalServerError'
 
-    delete:
-      tags:
-        - Pinelabs Config
-      summary: Delete facility config
-      description: |
-        Soft-deletes the config (and, by cascading soft-delete, its payment
-        method mappings). Looked up by the config's own `id`.
-      operationId: deletePinelabsConfig
-      parameters:
-        - $ref: '#/components/parameters/ConfigId'
-      responses:
-        '204':
-          description: Config deleted
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
   /pinelabs_config/{id}/pos-terminals/:
     get:
       tags:
