@@ -115,17 +115,11 @@ class PinelabsConfigCreateSpec(EMRResource):
     pinelabs_merchant_id: str
     pinelabs_security_token: str
     payment_method_mappings: list[PinelabsPaymentMethodMappingWriteSpec] | None = None
-    pos_terminals: list[PinelabsPosTerminalWriteSpec] | None = None
 
     @field_validator("payment_method_mappings")
     @classmethod
     def validate_payment_method_mappings(cls, mappings):
         return _validate_payment_method_mappings(mappings)
-
-    @field_validator("pos_terminals")
-    @classmethod
-    def validate_pos_terminals(cls, terminals):
-        return _validate_pos_terminals(terminals)
 
 
 class PinelabsConfigUpdateSpec(EMRResource):
@@ -138,12 +132,18 @@ class PinelabsConfigUpdateSpec(EMRResource):
     pinelabs_merchant_id: str | None = None
     pinelabs_security_token: str | None = None
     payment_method_mappings: list[PinelabsPaymentMethodMappingWriteSpec] | None = None
-    pos_terminals: list[PinelabsPosTerminalWriteSpec] | None = None
 
     @field_validator("payment_method_mappings")
     @classmethod
     def validate_payment_method_mappings(cls, mappings):
         return _validate_payment_method_mappings(mappings)
+
+
+class PinelabsPosTerminalsUpdateSpec(EMRResource):
+    __model__ = PinelabsPosTerminal
+    __exclude__ = ["config", "device"]
+
+    pos_terminals: list[PinelabsPosTerminalWriteSpec]
 
     @field_validator("pos_terminals")
     @classmethod

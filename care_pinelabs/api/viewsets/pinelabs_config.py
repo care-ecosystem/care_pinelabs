@@ -1,6 +1,7 @@
 from django.db import IntegrityError, transaction
 from drf_spectacular.utils import extend_schema
 from rest_framework import status
+from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
@@ -13,6 +14,7 @@ from care_pinelabs.api.specs.pinelabs_config import (
     PinelabsConfigCreateSpec,
     PinelabsConfigReadSpec,
     PinelabsConfigUpdateSpec,
+    PinelabsPosTerminalsUpdateSpec,
 )
 from care_pinelabs.models.pinelabs_config import PinelabsConfig
 from care_pinelabs.models.pinelabs_payment_method_mapping import (
@@ -81,11 +83,6 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
         facility = get_object_or_404(Facility, external_id=request_data.facility_id)
         self._authorize_facility(facility)
 
-        devices = [
-            self._get_device(pos_terminal.device_id, facility)
-            for pos_terminal in request_data.pos_terminals or []
-        ]
-
         try:
             with transaction.atomic():
                 existing_config = PinelabsConfig._base_manager.filter(
@@ -110,27 +107,10 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                 self._replace_payment_method_mappings(
                     config, request_data.payment_method_mappings or []
                 )
-
-                for device in devices:
-                    existing_terminal = PinelabsPosTerminal._base_manager.filter(
-                        device=device
-                    ).first()
-                    if existing_terminal and not existing_terminal.deleted:
-                        raise _ConflictError(
-                            "This device is already linked to another Pinelabs pos terminal"
-                        )
-                    terminal = existing_terminal or PinelabsPosTerminal(device=device)
-                    terminal.config = config
-                    terminal.deleted = False
-                    terminal.created_by = request.user
-                    terminal.updated_by = request.user
-                    terminal.save()
         except _ConflictError as e:
             return self._conflict(str(e))
         except IntegrityError:
-            return self._conflict(
-                "Conflicting Pinelabs config or pos terminal link (concurrent request)"
-            )
+            return self._conflict("Pinelabs config already exists for this facility")
 
         config = self.get_queryset().get(pk=config.pk)
         return Response(
@@ -143,27 +123,6 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
         instance = self.get_object()
         self._authorize_facility(instance.facility)
         request_data = PinelabsConfigUpdateSpec(**request.data)
-
-        new_devices_by_id = {}
-        if request_data.pos_terminals is not None:
-            linked_device_ids = set(
-                PinelabsPosTerminal.objects.filter(config=instance).values_list(
-                    "device__external_id", flat=True
-                )
-            )
-            for pos_terminal in request_data.pos_terminals:
-                if pos_terminal.device_id in linked_device_ids:
-                    continue
-                device = self._get_device(pos_terminal.device_id, instance.facility)
-                if (
-                    PinelabsPosTerminal.objects.filter(device=device)
-                    .exclude(config=instance)
-                    .exists()
-                ):
-                    return self._conflict(
-                        "This device is already linked to another Pinelabs pos terminal"
-                    )
-                new_devices_by_id[pos_terminal.device_id] = device
 
         try:
             with transaction.atomic():
@@ -187,20 +146,55 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                     )
                     touched = True
 
-                if request_data.pos_terminals is not None:
-                    self._replace_pos_terminals(
-                        instance,
-                        request_data.pos_terminals,
-                        new_devices_by_id,
-                        request.user,
-                    )
-                    touched = True
-
                 if touched:
                     instance.updated_by = request.user
                     instance.save(
                         update_fields=[*update_fields, "updated_by", "modified_date"]
                     )
+        except _ConflictError as e:
+            return self._conflict(str(e))
+        except IntegrityError:
+            return self._conflict(
+                "This device is already linked to another Pinelabs pos terminal"
+            )
+
+        instance = self.get_queryset().get(pk=instance.pk)
+        return Response(PinelabsConfigReadSpec.serialize(instance).to_json())
+
+    @extend_schema(
+        request=PinelabsPosTerminalsUpdateSpec, responses=PinelabsConfigReadSpec
+    )
+    @action(detail=True, methods=["patch"], url_path="pos-terminals")
+    def pos_terminals(self, request, *args, **kwargs):
+        instance = self.get_object()
+        self._authorize_facility(instance.facility)
+        request_data = PinelabsPosTerminalsUpdateSpec(**request.data)
+
+        linked_device_ids = set(
+            PinelabsPosTerminal.objects.filter(config=instance).values_list(
+                "device__external_id", flat=True
+            )
+        )
+        new_devices_by_id = {}
+        for pos_terminal in request_data.pos_terminals:
+            if pos_terminal.device_id in linked_device_ids:
+                continue
+            device = self._get_device(pos_terminal.device_id, instance.facility)
+            if (
+                PinelabsPosTerminal.objects.filter(device=device)
+                .exclude(config=instance)
+                .exists()
+            ):
+                return self._conflict(
+                    "This device is already linked to another Pinelabs pos terminal"
+                )
+            new_devices_by_id[pos_terminal.device_id] = device
+
+        try:
+            with transaction.atomic():
+                self._replace_pos_terminals(
+                    instance, request_data.pos_terminals, new_devices_by_id, request.user
+                )
         except _ConflictError as e:
             return self._conflict(str(e))
         except IntegrityError:
