@@ -29,6 +29,9 @@ class _ConflictError(Exception):
     pass
 
 
+PinelabsPosTerminalReadSpecList = list[PinelabsPosTerminalReadSpec]
+
+
 @extend_schema(tags=["Pinelabs: Pinelabs Config"])
 class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
     database_model = PinelabsConfig
@@ -166,7 +169,7 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
         instance = self.get_queryset().get(pk=instance.pk)
         return Response(PinelabsConfigReadSpec.serialize(instance).to_json())
 
-    @extend_schema(responses=PinelabsPosTerminalReadSpec(many=True))
+    @extend_schema(responses=PinelabsPosTerminalReadSpecList)
     @action(detail=True, methods=["get"], url_path="pos-terminals")
     def pos_terminals(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -204,29 +207,33 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
         self._authorize_facility(instance.facility)
         request_data = PinelabsPosTerminalsUpdateSpec(**request.data)
 
-        linked_device_ids = set(
-            PinelabsPosTerminal.objects.filter(config=instance).values_list(
-                "device__external_id", flat=True
-            )
-        )
-        new_devices_by_id = {}
-        for pos_terminal in request_data.pos_terminals:
-            if pos_terminal.device_id in linked_device_ids:
-                continue
-            device = self._get_device(pos_terminal.device_id, instance.facility)
-            if (
-                PinelabsPosTerminal.objects.filter(device=device)
-                .exclude(config=instance)
-                .exists()
-            ):
-                return self._conflict(
-                    f"Device {device.registered_name} is already linked to "
-                    "another Pinelabs POS terminal"
-                )
-            new_devices_by_id[pos_terminal.device_id] = device
-
         try:
             with transaction.atomic():
+                instance = PinelabsConfig.objects.select_for_update().get(
+                    pk=instance.pk
+                )
+
+                linked_device_ids = set(
+                    PinelabsPosTerminal.objects.filter(config=instance).values_list(
+                        "device__external_id", flat=True
+                    )
+                )
+                new_devices_by_id = {}
+                for pos_terminal in request_data.pos_terminals:
+                    if pos_terminal.device_id in linked_device_ids:
+                        continue
+                    device = self._get_device(pos_terminal.device_id, instance.facility)
+                    if (
+                        PinelabsPosTerminal.objects.filter(device=device)
+                        .exclude(config=instance)
+                        .exists()
+                    ):
+                        raise _ConflictError(
+                            f"Device {device.registered_name} is already linked "
+                            "to another Pinelabs POS terminal"
+                        )
+                    new_devices_by_id[pos_terminal.device_id] = device
+
                 self._replace_pos_terminals(
                     instance, request_data.pos_terminals, new_devices_by_id, request.user
                 )
