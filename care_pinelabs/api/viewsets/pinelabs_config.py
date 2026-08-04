@@ -199,7 +199,7 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
         )
 
     @extend_schema(
-        request=PinelabsPosTerminalsUpdateSpec, responses=PinelabsConfigReadSpec
+        request=PinelabsPosTerminalsUpdateSpec, responses=PinelabsPosTerminalReadSpecList
     )
     @pos_terminals.mapping.patch
     def _update_pos_terminals(self, request, *args, **kwargs):
@@ -246,8 +246,12 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                 "This device is already linked to another Pinelabs POS terminal"
             )
 
-        instance = self.get_queryset().get(pk=instance.pk)
-        return Response(PinelabsConfigReadSpec.serialize(instance).to_json())
+        terminals = PinelabsPosTerminal.objects.filter(config=instance).select_related(
+            "device", "created_by", "updated_by"
+        )
+        return Response(
+            [PinelabsPosTerminalReadSpec.serialize(t).to_json() for t in terminals]
+        )
 
     @staticmethod
     def _replace_payment_method_mappings(config, mappings_spec):

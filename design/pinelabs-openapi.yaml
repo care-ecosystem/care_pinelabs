@@ -323,11 +323,13 @@ paths:
                 - device_id: "d3a9e4c6-bf01-5f8d-c512-9f4e0a6c2d36"
       responses:
         '200':
-          description: Config with updated fields (fetch POS terminals separately via GET on this endpoint)
+          description: Updated list of active POS terminals for this config
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PinelabsConfig'
+                type: array
+                items:
+                  $ref: '#/components/schemas/PinelabsPosTerminal'
         '400':
           description: Validation error, e.g. duplicate device_id within the same request
           content:
