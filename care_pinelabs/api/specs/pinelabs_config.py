@@ -65,7 +65,7 @@ class PinelabsPaymentMethodMappingReadSpec(EMRResource):
     modified_date: datetime
 
 
-# ===================== Pos Terminal (embedded) =====================
+# ===================== POS Terminal (embedded) =====================
 class PinelabsPosTerminalWriteSpec(EMRResource):
     __model__ = PinelabsPosTerminal
     __exclude__ = ["config", "device"]
@@ -88,7 +88,6 @@ class PinelabsPosTerminalReadSpec(EMRResource):
     __exclude__ = ["config", "device"]
 
     id: UUID4 | None = None
-    config_id: UUID4 | None = None
     device: dict | None = None
     created_by: dict | None = None
     updated_by: dict | None = None
@@ -98,7 +97,6 @@ class PinelabsPosTerminalReadSpec(EMRResource):
     @classmethod
     def perform_extra_serialization(cls, mapping, obj):
         mapping["id"] = obj.external_id
-        mapping["config_id"] = obj.config.external_id
         mapping["device"] = DeviceSummarySpec.serialize(obj.device).to_json()
         cls.serialize_audit_users(mapping, obj)
 
@@ -115,17 +113,11 @@ class PinelabsConfigCreateSpec(EMRResource):
     pinelabs_merchant_id: str
     pinelabs_security_token: str
     payment_method_mappings: list[PinelabsPaymentMethodMappingWriteSpec] | None = None
-    pos_terminals: list[PinelabsPosTerminalWriteSpec] | None = None
 
     @field_validator("payment_method_mappings")
     @classmethod
     def validate_payment_method_mappings(cls, mappings):
         return _validate_payment_method_mappings(mappings)
-
-    @field_validator("pos_terminals")
-    @classmethod
-    def validate_pos_terminals(cls, terminals):
-        return _validate_pos_terminals(terminals)
 
 
 class PinelabsConfigUpdateSpec(EMRResource):
@@ -138,12 +130,18 @@ class PinelabsConfigUpdateSpec(EMRResource):
     pinelabs_merchant_id: str | None = None
     pinelabs_security_token: str | None = None
     payment_method_mappings: list[PinelabsPaymentMethodMappingWriteSpec] | None = None
-    pos_terminals: list[PinelabsPosTerminalWriteSpec] | None = None
 
     @field_validator("payment_method_mappings")
     @classmethod
     def validate_payment_method_mappings(cls, mappings):
         return _validate_payment_method_mappings(mappings)
+
+
+class PinelabsPosTerminalsUpdateSpec(EMRResource):
+    __model__ = PinelabsPosTerminal
+    __exclude__ = ["config", "device"]
+
+    pos_terminals: list[PinelabsPosTerminalWriteSpec]
 
     @field_validator("pos_terminals")
     @classmethod
@@ -162,7 +160,6 @@ class PinelabsConfigReadSpec(EMRResource):
     allow_partial_payment: bool
     pinelabs_merchant_id: str
     payment_method_mappings: list[dict] = []
-    pos_terminals: list[dict] = []
     created_by: dict | None = None
     updated_by: dict | None = None
     created_date: datetime
@@ -175,9 +172,5 @@ class PinelabsConfigReadSpec(EMRResource):
         mapping["payment_method_mappings"] = [
             PinelabsPaymentMethodMappingReadSpec.serialize(m).to_json()
             for m in obj.payment_method_mappings.all()
-        ]
-        mapping["pos_terminals"] = [
-            PinelabsPosTerminalReadSpec.serialize(t).to_json()
-            for t in obj.pinelabsposterminal_set.all()
         ]
         cls.serialize_audit_users(mapping, obj)

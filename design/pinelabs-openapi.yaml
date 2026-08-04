@@ -9,7 +9,8 @@ info:
       default payment flow and Pine Labs → CARE payment method mappings
       (embedded on the config, similar to eaushadhi's supplier_mappings pattern)
     - Register Pine Labs POS terminals as CARE `emr.Device` records
-      (`PinelabsPosTerminal` links a `Device` to a facility's `PinelabsConfig`;
+      (`PinelabsPosTerminal` links a `Device` to a facility's `PinelabsConfig`
+      via the dedicated `PATCH /pinelabs_config/{id}/pos-terminals/` endpoint;
       the device's own `client_id`/`store_id` metadata is managed via the core
       CARE `emr/device` API and the `pos-terminal` device-type plugin, not here)
     - Upload payment transactions to a Pine Labs terminal (card/UPI/BharatQR)
@@ -50,7 +51,8 @@ tags:
   - name: Pinelabs Config
     description: |
       Per-facility Pine Labs configuration, with embedded payment method
-      mappings and pos terminals (linked CARE POS-terminal devices)
+      mappings. Linked POS terminals (CARE POS-terminal devices) are managed
+      and retrieved via the dedicated /pos-terminals/ sub-endpoint.
   - name: Gateway
     description: Upload, poll, refresh, and cancel Pine Labs payment transactions
 
@@ -91,11 +93,12 @@ paths:
       summary: Create facility config
       description: |
         One-time initial setup: create the Pine Labs configuration for a
-        facility, optionally with one or more payment method mappings and
-        one or more pos terminals (linking already-existing `emr.Device`
-        records of `care_type=pos-terminal`) in the same call. A facility
-        can have only one config (OneToOne on facility) — use
-        PATCH /pinelabs_config/{id}/ for subsequent edits.
+        facility, optionally with one or more payment method mappings in
+        the same call. A facility can have only one config (OneToOne on
+        facility) — use PATCH /pinelabs_config/{id}/ for subsequent edits
+        to config fields/payment method mappings, and
+        PATCH /pinelabs_config/{id}/pos-terminals/ to link/unlink pos
+        terminals (not accepted on create).
       operationId: createPinelabsConfig
       requestBody:
         required: true
@@ -117,9 +120,6 @@ paths:
                 - care_method: "cash"
                   pinelabs_method: "2"
                   is_default: false
-              pos_terminals:
-                - device_id: "c2f8d3b5-ae90-4f7c-b401-8e3c9d6f1b25"
-                - device_id: "d3a9e4c6-bf01-5f8d-c512-9f4e0a6c2d36"
       responses:
         '201':
           description: Config created
@@ -141,15 +141,13 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          description: Facility, or one of the given device_ids, not found
+          description: Facility not found
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorEnvelope'
         '409':
-          description: |
-            Conflict - this facility already has a config, or one of the
-            given devices is already linked to another pos terminal
+          description: Conflict - this facility already has a config
           content:
             application/json:
               schema:
@@ -181,7 +179,9 @@ paths:
             format: uuid
       responses:
         '200':
-          description: Config with embedded payment_method_mappings and pos_terminals
+          description: |
+            Config with embedded payment_method_mappings. POS terminals are
+            not embedded here — fetch via GET /pinelabs_config/{id}/pos-terminals/.
           content:
             application/json:
               schema:
@@ -215,19 +215,13 @@ paths:
         `facility_id`) — use GET /pinelabs_config/?facility_id= first to
         resolve it. All fields optional; only supplied fields are updated.
 
-        `payment_method_mappings` and `pos_terminals`, if provided, each
-        fully replace their existing set:
-        - `payment_method_mappings` entries are matched by their own `id`
-          (omit `id` to create a new mapping); entries missing from the
-          submitted array are soft-deleted. At most one entry may have
-          `is_default = true`.
-        - `pos_terminals` entries are matched by `device_id` (their natural
-          key — a device links to only one pos terminal, so no separate
-          `id` is needed); device_ids missing from the submitted array are
-          unlinked (soft-deleted), new device_ids are linked.
+        `payment_method_mappings`, if provided, fully replaces the existing
+        set: entries are matched by their own `id` (omit `id` to create a
+        new mapping); entries missing from the submitted array are
+        soft-deleted. At most one entry may have `is_default = true`.
 
-        Omit either field to leave that set untouched (e.g. omit
-        `pos_terminals` to edit only `payment_method_mappings`).
+        POS terminals are not managed here — use
+        PATCH /pinelabs_config/{id}/pos-terminals/.
       operationId: updatePinelabsConfig
       parameters:
         - $ref: '#/components/parameters/ConfigId'
@@ -260,8 +254,100 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /pinelabs_config/{id}/pos-terminals/:
+    get:
+      tags:
+        - Pinelabs Config
+      summary: List POS terminals linked to a facility config
+      description: |
+        Retrieve all active POS terminals linked to this config — looked up
+        by the config's own `id`. Not embedded on
+        GET /pinelabs_config/?facility_id= — use this endpoint instead.
+      operationId: getPinelabsConfigPosTerminals
+      parameters:
+        - $ref: '#/components/parameters/ConfigId'
+        - name: mine
+          in: query
+          required: false
+          description: |
+            If true, only pos terminals for devices belonging to
+            organizations the current user has access to are returned
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: List of active POS terminals for this config
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PinelabsPosTerminal'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    patch:
+      tags:
+        - Pinelabs Config
+      summary: Link/unlink POS terminals on a facility config
+      description: |
+        Full replacement of the POS terminals linked to this config —
+        looked up by the config's own `id`. Entries are matched by
+        `device_id` (their natural key — a device links to only one pos
+        terminal, so no separate `id` is needed): device_ids missing from
+        the submitted array are unlinked (soft-deleted), new device_ids
+        (existing `emr.Device` records of `care_type=pos-terminal`,
+        belonging to this config's facility) are linked.
+      operationId: updatePinelabsConfigPosTerminals
+      parameters:
+        - $ref: '#/components/parameters/ConfigId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PinelabsPosTerminalsUpdate'
+            example:
+              pos_terminals:
+                - device_id: "c2f8d3b5-ae90-4f7c-b401-8e3c9d6f1b25"
+                - device_id: "d3a9e4c6-bf01-5f8d-c512-9f4e0a6c2d36"
+      responses:
+        '200':
+          description: Updated list of active POS terminals for this config
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PinelabsPosTerminal'
+        '400':
+          description: Validation error, e.g. duplicate device_id within the same request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Config, or one of the given device_ids, not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '409':
-          description: Conflict - one of the given device_ids is already linked to another pos terminal
+          description: Conflict - one of the given devices is already linked to another Pinelabs POS terminal
           content:
             application/json:
               schema:
@@ -269,29 +355,7 @@ paths:
               example:
                 errors:
                   - type: "conflict"
-                    msg: "This device is already linked to another Pinelabs pos terminal"
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-
-    delete:
-      tags:
-        - Pinelabs Config
-      summary: Delete facility config
-      description: |
-        Soft-deletes the config (and, by cascading soft-delete, its payment
-        method mappings). Looked up by the config's own `id`.
-      operationId: deletePinelabsConfig
-      parameters:
-        - $ref: '#/components/parameters/ConfigId'
-      responses:
-        '204':
-          description: Config deleted
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
+                    msg: "Device POS Terminal 01 is already linked to another Pinelabs POS terminal"
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -368,7 +432,7 @@ paths:
                   - type: "permission_denied"
                     msg: "You do not have permission to perform this action"
         '404':
-          description: Pos terminal, account, invoice, or location not found
+          description: POS terminal, account, invoice, or location not found
           content:
             application/json:
               schema:
@@ -682,15 +746,6 @@ components:
             post-creation via PATCH /pinelabs_config/{id}/.
           items:
             $ref: '#/components/schemas/PinelabsPaymentMethodMappingInput'
-        pos_terminals:
-          type: array
-          description: |
-            Optional pos terminals to link on creation — links existing
-            `emr.Device` records (of `care_type=pos-terminal`) to this
-            config in the same call. Manage post-creation via
-            PATCH /pinelabs_config/{id}/ (full replace).
-          items:
-            $ref: '#/components/schemas/PinelabsPosTerminalInput'
 
     PinelabsConfigUpdate:
       type: object
@@ -713,9 +768,18 @@ components:
           description: Full replacement set, if provided. See PATCH description for reconciliation semantics.
           items:
             $ref: '#/components/schemas/PinelabsPaymentMethodMappingInput'
+
+    PinelabsPosTerminalsUpdate:
+      type: object
+      required:
+        - pos_terminals
+      properties:
         pos_terminals:
           type: array
-          description: Full replacement set, if provided. See PATCH description for reconciliation semantics.
+          description: |
+            Full replacement set of linked POS terminals. See
+            PATCH /pinelabs_config/{id}/pos-terminals/ description for
+            reconciliation semantics.
           items:
             $ref: '#/components/schemas/PinelabsPosTerminalInput'
 
@@ -728,7 +792,6 @@ components:
         - allow_partial_payment
         - pinelabs_merchant_id
         - payment_method_mappings
-        - pos_terminals
         - created_by
         - created_date
         - modified_date
@@ -755,11 +818,6 @@ components:
           description: All active payment method mappings for this config
           items:
             $ref: '#/components/schemas/PinelabsPaymentMethodMapping'
-        pos_terminals:
-          type: array
-          description: All active pos terminals linked to this config
-          items:
-            $ref: '#/components/schemas/PinelabsPosTerminal'
         created_by:
           allOf:
             - $ref: '#/components/schemas/UserSummary'
@@ -780,7 +838,7 @@ components:
           readOnly: true
           example: "2026-05-19T19:29:35.868682+05:30"
 
-    # ===================== Pinelabs Pos Terminal =====================
+    # ===================== Pinelabs POS Terminal =====================
     DeviceSummary:
       type: object
       description: |
@@ -825,7 +883,6 @@ components:
       type: object
       required:
         - id
-        - config_id
         - device
         - created_by
         - created_date
@@ -835,9 +892,6 @@ components:
           type: string
           format: uuid
           readOnly: true
-        config_id:
-          type: string
-          format: uuid
         device:
           allOf:
             - $ref: '#/components/schemas/DeviceSummary'
@@ -902,7 +956,7 @@ components:
       type: object
       description: |
         Extends the core payment reconciliation write payload with a Pine
-        Labs pos terminal reference and payment mode. `status` is always
+        Labs POS terminal reference and payment mode. `status` is always
         forced to `draft` and `outcome` to `queued` server-side, regardless
         of input.
       required:
