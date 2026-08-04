@@ -7,6 +7,7 @@ from rest_framework.response import Response
 
 from care.emr.api.viewsets.base import EMRBaseViewSet, EMRRetrieveMixin
 from care.emr.models.device import Device
+from care.emr.models.organization import FacilityOrganization, FacilityOrganizationUser
 from care.facility.models import Facility
 from care.security.authorization import AuthorizationController
 from care.utils.shortcuts import get_object_or_404
@@ -170,6 +171,23 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
         terminals = PinelabsPosTerminal.objects.filter(config=instance).select_related(
             "device", "created_by", "updated_by"
         )
+
+        if request.query_params.get("mine", "false").lower() == "true":
+            facility_organizations = FacilityOrganization.objects.filter(
+                facility=instance.facility
+            ).values_list("id", flat=True)
+            if request.user.is_superuser:
+                users_facility_organizations = facility_organizations
+            else:
+                users_facility_organizations = FacilityOrganizationUser.objects.filter(
+                    organization_id__in=facility_organizations, user=request.user
+                ).values_list("organization_id", flat=True)
+            terminals = terminals.filter(
+                device__facility_organization_cache__overlap=list(
+                    users_facility_organizations
+                )
+            )
+
         return Response(
             [PinelabsPosTerminalReadSpec.serialize(t).to_json() for t in terminals]
         )
