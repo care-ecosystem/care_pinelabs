@@ -25,7 +25,7 @@ from care_pinelabs.api.specs.gateway import (
     TransactionStatusSpec,
     UploadTransactionSpec,
 )
-from care_pinelabs.models.pinelabs_terminal import PinelabsTerminal
+from care_pinelabs.models.pinelabs_pos_terminal import PinelabsPosTerminal
 from care_pinelabs.services.payment_reconciliation import (
     PINELABS_META_KEY,
     PLUTUS_RESPONSE_CODE_APPROVED,
@@ -59,8 +59,11 @@ class GatewayViewSet(GenericViewSet):
     def get_exception_handler(self):
         return pinelabs_exception_handler
 
-    def _get_terminal(self, external_id) -> PinelabsTerminal:
-        return get_object_or_404(PinelabsTerminal, external_id=external_id)
+    def _get_terminal(self, external_id) -> PinelabsPosTerminal:
+        return get_object_or_404(
+            PinelabsPosTerminal.objects.select_related("config__facility", "device"),
+            external_id=external_id,
+        )
 
     def _get_reconciliation(self, external_id) -> PaymentReconciliation:
         return get_object_or_404(PaymentReconciliation, external_id=external_id)
@@ -111,7 +114,7 @@ class GatewayViewSet(GenericViewSet):
         # Step 1: Authorize and get account/invoice (single fetch)
         try:
             account, invoice = authorize_payment_reconciliation_create(
-                request_data, terminal.facility, user
+                request_data, terminal.config.facility, user
             )
         except (ValidationError, PermissionDenied) as e:
             logger.warning("Authorization failed: %s", str(e))
@@ -160,14 +163,14 @@ class GatewayViewSet(GenericViewSet):
                 logger.info(
                     "Terminal lock acquired: %s (terminal=%s, status=%s)",
                     transaction_number,
-                    terminal.name,
+                    terminal.device.registered_name,
                     terminal_txn.status,
                 )
 
                 # Create payment reconciliation (draft, initiated)
                 reconciliation = create_payment_reconciliation(
                     request_data,
-                    facility=terminal.facility,
+                    facility=terminal.config.facility,
                     user=user,
                     meta={
                         "pinelabs": {
@@ -198,8 +201,10 @@ class GatewayViewSet(GenericViewSet):
                             allowed_payment_mode=request_data.payment_mode,
                             amount=rupees_to_paise(request_data.amount),
                             user_id=user.username,
-                            client_id=terminal.client_id,
-                            store_id=terminal.store_id,
+                            merchant_id=terminal.config.pinelabs_merchant_id,
+                            security_token=terminal.config.pinelabs_security_token,
+                            client_id=terminal.device.metadata["client_id"],
+                            store_id=terminal.device.metadata["store_id"],
                             auto_cancel_duration_in_minutes=plugin_settings.PINELABS_AUTO_CANCEL_DURATION_MINUTES,
                         )
                     )
@@ -421,8 +426,10 @@ class GatewayViewSet(GenericViewSet):
         plutus_response = PlutusCloudService().cancel_transaction(
             CancelTransactionRequestData(
                 plutus_transaction_reference_id=str(transaction_reference_id),
-                client_id=terminal.client_id,
-                store_id=terminal.store_id,
+                merchant_id=terminal.config.pinelabs_merchant_id,
+                security_token=terminal.config.pinelabs_security_token,
+                client_id=terminal.device.metadata["client_id"],
+                store_id=terminal.device.metadata["store_id"],
                 amount=rupees_to_paise(reconciliation.amount),
             )
         )

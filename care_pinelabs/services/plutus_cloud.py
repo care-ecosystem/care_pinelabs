@@ -27,8 +27,8 @@ class PlutusCloudService:
             "AllowedPaymentMode": data.allowed_payment_mode.value,
             "Amount": data.amount,
             "UserID": data.user_id or "",
-            "MerchantID": plugin_settings.PINELABS_MERCHANT_ID,
-            "SecurityToken": plugin_settings.PINELABS_SECURITY_TOKEN,
+            "MerchantID": data.merchant_id,
+            "SecurityToken": data.security_token,
             "Clientid": data.client_id,
             "Storeid": data.store_id,
             "AutoCancelDurationInMinutes": data.auto_cancel_duration_in_minutes,
@@ -51,8 +51,8 @@ class PlutusCloudService:
     def get_status(self, data: GetStatusRequestData) -> GetStatusResponseData:
         url = f"{self.base_endpoint}/GetCloudBasedTxnStatus"
         payload = {
-            "MerchantID": plugin_settings.PINELABS_MERCHANT_ID,
-            "SecurityToken": plugin_settings.PINELABS_SECURITY_TOKEN,
+            "MerchantID": data.merchant_id,
+            "SecurityToken": data.security_token,
             "Clientid": data.client_id,
             "Storeid": data.store_id,
             "PlutusTransactionReferenceID": data.plutus_transaction_reference_id,
@@ -78,8 +78,8 @@ class PlutusCloudService:
     ) -> CancelTransactionResponseData:
         url = f"{self.base_endpoint}/CancelTransactionForced"
         payload = {
-            "MerchantID": plugin_settings.PINELABS_MERCHANT_ID,
-            "SecurityToken": plugin_settings.PINELABS_SECURITY_TOKEN,
+            "MerchantID": data.merchant_id,
+            "SecurityToken": data.security_token,
             "Clientid": data.client_id,
             "Storeid": data.store_id,
             "PlutusTransactionReferenceID": data.plutus_transaction_reference_id,

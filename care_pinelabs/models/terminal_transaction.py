@@ -38,7 +38,7 @@ class PinelabsTerminalTransaction(BaseModel):
 
     # Core relationships
     terminal = models.ForeignKey(
-        "care_pinelabs.PinelabsTerminal",
+        "care_pinelabs.PinelabsPosTerminal",
         on_delete=models.PROTECT,
         related_name="transactions",
         db_index=True,
