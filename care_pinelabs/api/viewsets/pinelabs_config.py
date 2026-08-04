@@ -104,15 +104,18 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                 config.pinelabs_security_token = request_data.pinelabs_security_token
                 config.created_by = request.user
                 config.updated_by = request.user
-                config.save()
+                try:
+                    config.save()
+                except IntegrityError:
+                    raise _ConflictError(
+                        "Pinelabs config already exists for this facility"
+                    ) from None
 
                 self._replace_payment_method_mappings(
                     config, request_data.payment_method_mappings or []
                 )
         except _ConflictError as e:
             return self._conflict(str(e))
-        except IntegrityError:
-            return self._conflict("Pinelabs config already exists for this facility")
 
         config = self.get_queryset().get(pk=config.pk)
         return Response(
@@ -157,7 +160,7 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
             return self._conflict(str(e))
         except IntegrityError:
             return self._conflict(
-                "This device is already linked to another Pinelabs POS terminal"
+                "A conflicting payment method mapping already exists for this config"
             )
 
         instance = self.get_queryset().get(pk=instance.pk)
@@ -227,6 +230,8 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                 self._replace_pos_terminals(
                     instance, request_data.pos_terminals, new_devices_by_id, request.user
                 )
+                instance.updated_by = request.user
+                instance.save(update_fields=["updated_by", "modified_date"])
         except _ConflictError as e:
             return self._conflict(str(e))
         except IntegrityError:
