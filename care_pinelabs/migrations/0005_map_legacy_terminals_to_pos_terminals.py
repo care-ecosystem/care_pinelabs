@@ -9,12 +9,6 @@ def map_legacy_terminals(apps, schema_editor):
 
     with schema_editor.connection.cursor() as cursor:
         cursor.execute(
-            'SELECT legacy_terminal_id, pos_terminal_id '
-            'FROM care_pinelabs_legacy_terminal_mapping;'
-        )
-        manual_mapping = dict(cursor.fetchall())
-
-        cursor.execute(
             'SELECT DISTINCT terminal_id FROM pinelabs_terminal_transaction '
             'WHERE terminal_id IS NOT NULL;'
         )
@@ -25,27 +19,25 @@ def map_legacy_terminals(apps, schema_editor):
     )
     valid_pos_terminal_ids = set(valid_pos_terminals.values_list('id', flat=True))
 
+    def unique_id(queryset):
+        ids = list(queryset.values_list('id', flat=True)[:2])
+        return ids[0] if len(ids) == 1 else None
+
     mapping = {}
     for legacy_terminal in PinelabsTerminal.objects.filter(id__in=legacy_terminal_ids):
-        candidates = list(
-            valid_pos_terminals.filter(
-                device__metadata__client_id=legacy_terminal.client_id,
-                device__metadata__store_id=legacy_terminal.store_id,
-            ).values_list('id', flat=True)
+        same_facility = valid_pos_terminals.filter(
+            config__facility_id=legacy_terminal.facility_id
         )
-        if len(candidates) == 1:
-            mapping[legacy_terminal.id] = candidates[0]
-            continue
+        client_store_match = same_facility.filter(
+            device__metadata__client_id=legacy_terminal.client_id,
+            device__metadata__store_id=legacy_terminal.store_id,
+        )
 
-        facility_pos_terminal = (
-            valid_pos_terminals.filter(config__facility_id=legacy_terminal.facility_id)
-            .order_by('id')
-            .values_list('id', flat=True)
-            .first()
+        pos_terminal_id = unique_id(client_store_match) or (
+            same_facility.order_by('id').values_list('id', flat=True).first()
         )
-        if facility_pos_terminal is not None:
-            mapping[legacy_terminal.id] = facility_pos_terminal
-    mapping.update(manual_mapping)
+        if pos_terminal_id is not None:
+            mapping[legacy_terminal.id] = pos_terminal_id
 
     errors = [
         legacy_id
@@ -54,10 +46,9 @@ def map_legacy_terminals(apps, schema_editor):
     ]
     if errors:
         raise RuntimeError(
-            'Could not auto-match, and care_pinelabs_legacy_terminal_mapping has no '
-            f'valid row, for legacy PinelabsTerminal ids {sorted(errors)}. Insert '
-            '(legacy_terminal_id, pos_terminal_id) rows pointing at an active '
-            'PinelabsPosTerminal for each and re-run this migration.'
+            'No active PinelabsPosTerminal exists at the facility for legacy '
+            f'PinelabsTerminal ids {sorted(errors)}. Create one before re-running '
+            'this migration.'
         )
 
     with schema_editor.connection.cursor() as cursor:
@@ -67,7 +58,6 @@ def map_legacy_terminals(apps, schema_editor):
                 'WHERE terminal_id = %s;',
                 [pos_id, legacy_id],
             )
-        cursor.execute('DROP TABLE IF EXISTS care_pinelabs_legacy_terminal_mapping;')
 
 
 class Migration(migrations.Migration):

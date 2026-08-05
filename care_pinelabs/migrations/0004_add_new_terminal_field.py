@@ -23,13 +23,4 @@ class Migration(migrations.Migration):
                 help_text='Replacement POS terminal, populated by 0005 before the FK swap',
             ),
         ),
-        migrations.RunSQL(
-            sql=(
-                'CREATE TABLE IF NOT EXISTS care_pinelabs_legacy_terminal_mapping ('
-                'legacy_terminal_id bigint PRIMARY KEY, '
-                'pos_terminal_id bigint NOT NULL'
-                ');'
-            ),
-            reverse_sql='DROP TABLE IF EXISTS care_pinelabs_legacy_terminal_mapping;',
-        ),
     ]

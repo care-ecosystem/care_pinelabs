@@ -61,7 +61,9 @@ class GatewayViewSet(GenericViewSet):
 
     def _get_terminal(self, external_id) -> PinelabsPosTerminal:
         return get_object_or_404(
-            PinelabsPosTerminal.objects.select_related("config__facility", "device"),
+            PinelabsPosTerminal.objects.select_related(
+                "config__facility", "device"
+            ).filter(device__deleted=False, config__deleted=False),
             external_id=external_id,
         )
 
