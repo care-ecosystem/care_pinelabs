@@ -7,7 +7,7 @@ from care.emr.models.payment_reconciliation import PaymentReconciliation
 from care.emr.resources.payment_reconciliation.spec import (
     PaymentReconciliationOutcomeOptions,
 )
-from care_pinelabs.models.pinelabs_terminal import PinelabsTerminal
+from care_pinelabs.models.pinelabs_pos_terminal import PinelabsPosTerminal
 from care_pinelabs.services.payment_reconciliation import (
     PINELABS_META_KEY,
     apply_status_to_reconciliation,
@@ -77,7 +77,16 @@ def poll_pinelabs_transaction_status(
         )
         return
 
-    terminal = PinelabsTerminal.objects.filter(external_id=terminal_external_id).first()
+    terminal = (
+        PinelabsPosTerminal.objects.filter(
+            external_id=terminal_external_id,
+            deleted=False,
+            device__deleted=False,
+            config__deleted=False,
+        )
+        .select_related("device", "config")
+        .first()
+    )
     if terminal is None:
         logger.error(
             "Pinelabs terminal %s for PaymentReconciliation %s not found",
@@ -89,8 +98,10 @@ def poll_pinelabs_transaction_status(
     response = PlutusCloudService().get_status(
         GetStatusRequestData(
             plutus_transaction_reference_id=str(transaction_reference_id),
-            client_id=terminal.client_id,
-            store_id=terminal.store_id,
+            merchant_id=terminal.config.pinelabs_merchant_id,
+            security_token=terminal.config.pinelabs_security_token,
+            client_id=terminal.device.metadata["client_id"],
+            store_id=terminal.device.metadata["store_id"],
         )
     )
 

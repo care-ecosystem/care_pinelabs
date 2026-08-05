@@ -20,7 +20,7 @@ from care.facility.models.facility import Facility
 from care.security.authorization.base import AuthorizationController
 from care.utils.shortcuts import get_object_or_404
 from care.utils.time_util import care_now
-from care_pinelabs.models.pinelabs_terminal import PinelabsTerminal
+from care_pinelabs.models.pinelabs_pos_terminal import PinelabsPosTerminal
 from care_pinelabs.services.specs.plutus_cloud import (
     CancelTransactionResponseData,
     GetStatusResponseData,
@@ -50,7 +50,7 @@ def _metainfo_to_dict(items) -> dict[str, str | None]:
 
 def build_upload_meta(
     *,
-    terminal: PinelabsTerminal,
+    terminal: PinelabsPosTerminal,
     transaction_number: str,
     payment_mode: str,
     response: UploadTransactionResponseData,
@@ -211,19 +211,13 @@ def validate_upload_business_rules(terminal, invoice, amount):
     Validate business rules for transaction upload.
 
     Args:
-        terminal: PinelabsTerminal instance
+        terminal: PinelabsPosTerminal instance
         invoice: Invoice instance (optional, can be None for account payments)
         amount: Payment amount (Decimal)
 
     Raises:
         ValidationError: If any business rule validation fails
     """
-    from care_pinelabs.models.pinelabs_terminal import PinelabsTerminal
-
-    # Check terminal is active
-    if not terminal.is_active:
-        raise ValidationError(f"Terminal {terminal.name} is not active")
-
     # Invoice-specific validations (only if invoice payment)
     if invoice:
         # Validate invoice is not already balanced
@@ -385,7 +379,6 @@ def refresh_payment_reconciliation_status(
     Returns tuple of (reconciliation, status_changed)
     where status_changed is True if status was updated.
     """
-    from care_pinelabs.models.pinelabs_terminal import PinelabsTerminal
     from care_pinelabs.services.plutus_cloud import PlutusCloudService
     from care_pinelabs.services.specs.plutus_cloud import GetStatusRequestData
 
@@ -401,14 +394,21 @@ def refresh_payment_reconciliation_status(
         raise ValidationError("PaymentReconciliation has no pinelabs metadata")
 
     # 3. Get terminal configuration
-    terminal = get_object_or_404(PinelabsTerminal, external_id=terminal_external_id)
+    terminal = get_object_or_404(
+        PinelabsPosTerminal.objects.select_related("device", "config").filter(
+            deleted=False, device__deleted=False, config__deleted=False
+        ),
+        external_id=terminal_external_id,
+    )
 
     # 4. Call Pine Labs GetStatus API
     plutus_response = PlutusCloudService().get_status(
         GetStatusRequestData(
             plutus_transaction_reference_id=str(transaction_reference_id),
-            client_id=terminal.client_id,
-            store_id=terminal.store_id,
+            merchant_id=terminal.config.pinelabs_merchant_id,
+            security_token=terminal.config.pinelabs_security_token,
+            client_id=terminal.device.metadata["client_id"],
+            store_id=terminal.device.metadata["store_id"],
         )
     )
 

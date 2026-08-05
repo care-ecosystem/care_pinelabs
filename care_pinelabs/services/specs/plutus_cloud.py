@@ -20,6 +20,8 @@ class UploadTransactionRequestData(BaseModel):
     allowed_payment_mode: AllowedPaymentMode = AllowedPaymentMode.CARD
     amount: int
     user_id: str | None = None
+    merchant_id: str
+    security_token: str
     client_id: str
     store_id: str
     auto_cancel_duration_in_minutes: int = 5
@@ -34,6 +36,8 @@ class UploadTransactionResponseData(BaseModel):
 
 class GetStatusRequestData(BaseModel):
     plutus_transaction_reference_id: str
+    merchant_id: str
+    security_token: str
     client_id: str
     store_id: str
 
@@ -47,6 +51,8 @@ class GetStatusResponseData(BaseModel):
 
 class CancelTransactionRequestData(BaseModel):
     plutus_transaction_reference_id: str
+    merchant_id: str
+    security_token: str
     client_id: str
     store_id: str
     amount: int
