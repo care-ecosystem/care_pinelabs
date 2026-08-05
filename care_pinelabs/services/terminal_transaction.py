@@ -26,7 +26,7 @@ def acquire_terminal_lock(
     4. Unique transaction number (idempotency)
 
     Args:
-        terminal: PinelabsTerminal instance
+        terminal: PinelabsPosTerminal instance
         account: Account instance
         transaction_number: Generated transaction number
         payment_mode: Payment mode (1=Card, 10=UPI, 11=Bharat QR)
@@ -70,13 +70,13 @@ def acquire_terminal_lock(
 
             if blocking:
                 raise ValidationError(
-                    f"Terminal {terminal.name} is busy with transaction {blocking.transaction_number}. "
+                    f"Terminal {terminal.device.registered_name} is busy with transaction {blocking.transaction_number}. "
                     f"Started {blocking.created_date.strftime('%Y-%m-%d %H:%M:%S')}. "
                     f"Please wait for completion or cancel the existing transaction."
                 )
             else:
                 raise ValidationError(
-                    f"Terminal {terminal.name} is currently busy. Please try again."
+                    f"Terminal {terminal.device.registered_name} is currently busy. Please try again."
                 )
 
         # Constraint 2: Invoice already has active payment
@@ -93,7 +93,7 @@ def acquire_terminal_lock(
                 if blocking:
                     raise ValidationError(
                         f"Invoice {invoice.number} already has an active payment in progress "
-                        f"(transaction {blocking.transaction_number} on terminal {blocking.terminal.name}). "
+                        f"(transaction {blocking.transaction_number} on terminal {blocking.terminal.device.registered_name}). "
                         f"Please wait for it to complete or cancel it first."
                     )
                 else:
@@ -119,7 +119,7 @@ def acquire_terminal_lock(
             if blocking:
                 raise ValidationError(
                     f"Account {account.id} already has an active payment in progress "
-                    f"(transaction {blocking.transaction_number} on terminal {blocking.terminal.name}). "
+                    f"(transaction {blocking.transaction_number} on terminal {blocking.terminal.device.registered_name}). "
                     f"Please wait for it to complete or cancel it first."
                 )
             else:
@@ -146,7 +146,7 @@ def get_active_terminal_transaction(terminal):
     Get active transaction for terminal, if any.
 
     Args:
-        terminal: PinelabsTerminal instance
+        terminal: PinelabsPosTerminal instance
 
     Returns:
         PinelabsTerminalTransaction or None
