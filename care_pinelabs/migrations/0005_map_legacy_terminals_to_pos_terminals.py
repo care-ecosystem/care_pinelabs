@@ -4,43 +4,47 @@ from django.db import migrations
 
 
 def map_legacy_terminals(apps, schema_editor):
-    PinelabsTerminal = apps.get_model('care_pinelabs', 'PinelabsTerminal')
     PinelabsPosTerminal = apps.get_model('care_pinelabs', 'PinelabsPosTerminal')
     PinelabsTerminalTransaction = apps.get_model(
         'care_pinelabs', 'PinelabsTerminalTransaction'
     )
 
-    legacy_terminal_ids = (
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute(
+            'SELECT legacy_terminal_id, pos_terminal_id '
+            'FROM care_pinelabs_legacy_terminal_mapping;'
+        )
+        mapping = dict(cursor.fetchall())
+
+    legacy_terminal_ids = set(
         PinelabsTerminalTransaction.objects.values_list('terminal_id', flat=True)
         .distinct()
     )
+    valid_pos_terminal_ids = set(
+        PinelabsPosTerminal.objects.filter(deleted=False, config__deleted=False)
+        .values_list('id', flat=True)
+    )
 
-    unmapped = []
-    for legacy_terminal in PinelabsTerminal.objects.filter(
-        id__in=legacy_terminal_ids
-    ):
-        candidates = list(
-            PinelabsPosTerminal.objects.filter(
-                deleted=False,
-                config__facility_id=legacy_terminal.facility_id,
-                config__deleted=False,
-            )
-        )
-        if len(candidates) != 1:
-            unmapped.append((legacy_terminal.id, legacy_terminal.facility_id, len(candidates)))
-            continue
-
-        PinelabsTerminalTransaction.objects.filter(
-            terminal_id=legacy_terminal.id
-        ).update(new_terminal_id=candidates[0].id)
-
-    if unmapped:
+    errors = [
+        legacy_id
+        for legacy_id in legacy_terminal_ids
+        if mapping.get(legacy_id) not in valid_pos_terminal_ids
+    ]
+    if errors:
         raise RuntimeError(
-            'Cannot unambiguously map the following legacy PinelabsTerminal ids to a '
-            'PinelabsPosTerminal (facility_id, candidate_count): '
-            f'{unmapped}. Create/identify the correct PinelabsPosTerminal for each '
-            'facility and re-run this migration.'
+            'care_pinelabs_legacy_terminal_mapping has no valid row for legacy '
+            f'PinelabsTerminal ids {sorted(errors)}. Insert (legacy_terminal_id, '
+            'pos_terminal_id) rows pointing at an active PinelabsPosTerminal for '
+            'each and re-run this migration.'
         )
+
+    for legacy_id, pos_id in mapping.items():
+        PinelabsTerminalTransaction.objects.filter(terminal_id=legacy_id).update(
+            new_terminal_id=pos_id
+        )
+
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute('DROP TABLE IF EXISTS care_pinelabs_legacy_terminal_mapping;')
 
 
 class Migration(migrations.Migration):
