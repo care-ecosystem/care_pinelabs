@@ -35,7 +35,7 @@ info:
     - `gateway.upload_transaction`'s `terminal` field now refers to a
       `PinelabsPosTerminal` id instead of the old `PinelabsTerminal` id.
     - `PinelabsTerminalTransaction` is now also exposed read-only for querying
-      via `GET /pinelabs_transaction/`, alongside its existing role as an
+      via `GET /pinelabs_transactions/`, alongside its existing role as an
       internal lock/idempotency table.
 
   version: 2.0.0
@@ -368,7 +368,7 @@ paths:
           $ref: '#/components/responses/InternalServerError'
 
   # ---------- Pinelabs Transaction ----------
-  /pinelabs_transaction/:
+  /pinelabs_transactions/:
     get:
       tags:
         - Pinelabs Transaction
