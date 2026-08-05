@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from care.emr.api.viewsets.base import EMRBaseViewSet, EMRRetrieveMixin
 from care.emr.models.device import Device
 from care.emr.models.organization import FacilityOrganization, FacilityOrganizationUser
+from care.emr.resources.device.spec import DeviceStatusChoices
 from care.facility.models import Facility
 from care.security.authorization import AuthorizationController
 from care.utils.shortcuts import get_object_or_404
@@ -174,9 +175,9 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
     def pos_terminals(self, request, *args, **kwargs):
         instance = self.get_object()
         self._authorize_facility(instance.facility)
-        terminals = PinelabsPosTerminal.objects.filter(config=instance).select_related(
-            "device", "created_by", "updated_by"
-        )
+        terminals = PinelabsPosTerminal.objects.filter(
+            config=instance, device__status=DeviceStatusChoices.active.value
+        ).select_related("device", "created_by", "updated_by")
 
         if request.query_params.get("mine", "false").lower() == "true":
             facility_organizations = FacilityOrganization.objects.filter(
