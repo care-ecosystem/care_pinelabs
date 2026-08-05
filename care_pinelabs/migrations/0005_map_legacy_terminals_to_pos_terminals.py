@@ -15,26 +15,24 @@ def map_legacy_terminals(apps, schema_editor):
         legacy_terminal_ids = {row[0] for row in cursor.fetchall()}
 
     valid_pos_terminals = PinelabsPosTerminal.objects.filter(
-        deleted=False, config__deleted=False
+        deleted=False, config__deleted=False, device__care_type='pos-terminal'
     )
     valid_pos_terminal_ids = set(valid_pos_terminals.values_list('id', flat=True))
-
-    def unique_id(queryset):
-        ids = list(queryset.values_list('id', flat=True)[:2])
-        return ids[0] if len(ids) == 1 else None
 
     mapping = {}
     for legacy_terminal in PinelabsTerminal.objects.filter(id__in=legacy_terminal_ids):
         same_facility = valid_pos_terminals.filter(
             config__facility_id=legacy_terminal.facility_id
         )
-        client_store_match = same_facility.filter(
-            device__metadata__client_id=legacy_terminal.client_id,
-            device__metadata__store_id=legacy_terminal.store_id,
-        )
-
-        pos_terminal_id = unique_id(client_store_match) or (
-            same_facility.order_by('id').values_list('id', flat=True).first()
+        pos_terminal_id = (
+            same_facility.filter(
+                device__metadata__client_id=legacy_terminal.client_id,
+                device__metadata__store_id=legacy_terminal.store_id,
+            )
+            .order_by('id')
+            .values_list('id', flat=True)
+            .first()
+            or same_facility.order_by('id').values_list('id', flat=True).first()
         )
         if pos_terminal_id is not None:
             mapping[legacy_terminal.id] = pos_terminal_id
