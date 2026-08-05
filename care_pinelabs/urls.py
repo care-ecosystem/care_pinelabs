@@ -4,6 +4,7 @@ from care_pinelabs.api.viewsets.gateway import GatewayViewSet
 from care_pinelabs.api.viewsets.health_check import HealthCheckViewSet
 from care_pinelabs.api.viewsets.pinelabs_config import PinelabsConfigViewSet
 from care_pinelabs.api.viewsets.pinelabs_terminal import PinelabsTerminalViewSet
+from care_pinelabs.api.viewsets.pinelabs_transaction import PinelabsTransactionViewSet
 
 router = DefaultRouter()
 
@@ -13,6 +14,11 @@ router.register(
 )
 router.register(
     "pinelabs_config", PinelabsConfigViewSet, basename="pinelabs__pinelabs_config"
+)
+router.register(
+    "pinelabs_transactions",
+    PinelabsTransactionViewSet,
+    basename="pinelabs__pinelabs_transaction",
 )
 router.register("gateway", GatewayViewSet, basename="pinelabs__gateway")
 
