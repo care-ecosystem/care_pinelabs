@@ -34,7 +34,7 @@ info:
       linked via `PinelabsPosTerminal`.
     - `gateway.upload_transaction`'s `terminal` field now refers to a
       `PinelabsPosTerminal` id instead of the old `PinelabsTerminal` id.
-    - `PinelabsTerminalTransaction` remains an internal lock/idempotency table
+    - `PinelabsTransaction` remains an internal lock/idempotency table
       with no API — not exposed for querying.
 
   version: 2.0.0
@@ -367,7 +367,7 @@ paths:
       summary: Upload transaction to Pine Labs terminal
       description: |
         Creates a `PaymentReconciliation` (status `draft`, outcome `queued`) and
-        a `PinelabsTerminalTransaction` lock, then pushes the transaction to the
+        a `PinelabsTransaction` lock, then pushes the transaction to the
         Pine Labs Plutus Cloud upload API. A Celery task then polls for the
         final status asynchronously — poll `/gateway/transaction_status/` to
         observe updates.

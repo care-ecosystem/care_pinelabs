@@ -25,7 +25,7 @@ def generate_transaction_number(account, invoice=None):
         Uses select_for_update() to prevent race conditions in sequence generation.
         The unique constraint on transaction_number provides additional safety.
     """
-    from care_pinelabs.models.terminal_transaction import PinelabsTerminalTransaction
+    from care_pinelabs.models.pinelabs_transaction import PinelabsTransaction
 
     account_prefix = f"A{account.id}"
 
@@ -39,7 +39,7 @@ def generate_transaction_number(account, invoice=None):
             # Count ALL previous attempts for this account+invoice with row-level lock
             # This prevents concurrent transactions from getting the same count
             sequence = (
-                PinelabsTerminalTransaction.objects.filter(
+                PinelabsTransaction.objects.filter(
                     account=account, invoice=invoice
                 )
                 .select_for_update()
@@ -59,7 +59,7 @@ def generate_transaction_number(account, invoice=None):
 
             # Count today's payments for this account with row-level lock
             sequence = (
-                PinelabsTerminalTransaction.objects.filter(
+                PinelabsTransaction.objects.filter(
                     account=account,
                     invoice__isnull=True,
                     created_date__date=now.date(),

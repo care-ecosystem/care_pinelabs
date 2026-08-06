@@ -3,7 +3,7 @@ from django.db import models
 from care.utils.models.base import BaseModel
 
 
-class TerminalTransactionStatus(models.TextChoices):
+class PinelabsTransactionStatus(models.TextChoices):
     """
     Transaction status lifecycle:
     started → in_progress → completed
@@ -14,7 +14,7 @@ class TerminalTransactionStatus(models.TextChoices):
     COMPLETED = "completed", "Completed"  # Payment successful
 
 
-class PinelabsTerminalTransaction(BaseModel):
+class PinelabsTransaction(BaseModel):
     """
     Terminal transaction lock table.
 
@@ -91,8 +91,8 @@ class PinelabsTerminalTransaction(BaseModel):
     # Status tracking
     status = models.CharField(
         max_length=20,
-        choices=TerminalTransactionStatus.choices,
-        default=TerminalTransactionStatus.STARTED,
+        choices=PinelabsTransactionStatus.choices,
+        default=PinelabsTransactionStatus.STARTED,
         db_index=True,
         help_text="Current transaction status",
     )
@@ -103,7 +103,6 @@ class PinelabsTerminalTransaction(BaseModel):
     )
 
     class Meta:
-        db_table = "pinelabs_terminal_transaction"
         ordering = ["-created_date"]  # From BaseModel
 
         indexes = [
@@ -121,8 +120,8 @@ class PinelabsTerminalTransaction(BaseModel):
                 fields=["terminal"],
                 condition=models.Q(
                     status__in=[
-                        TerminalTransactionStatus.STARTED,
-                        TerminalTransactionStatus.IN_PROGRESS,
+                        PinelabsTransactionStatus.STARTED,
+                        PinelabsTransactionStatus.IN_PROGRESS,
                     ]
                 ),
                 name="unique_active_transaction_per_terminal",
@@ -133,8 +132,8 @@ class PinelabsTerminalTransaction(BaseModel):
                 fields=["invoice"],
                 condition=models.Q(
                     status__in=[
-                        TerminalTransactionStatus.STARTED,
-                        TerminalTransactionStatus.IN_PROGRESS,
+                        PinelabsTransactionStatus.STARTED,
+                        PinelabsTransactionStatus.IN_PROGRESS,
                     ],
                     invoice__isnull=False,
                 ),
@@ -146,8 +145,8 @@ class PinelabsTerminalTransaction(BaseModel):
                 fields=["account"],
                 condition=models.Q(
                     status__in=[
-                        TerminalTransactionStatus.STARTED,
-                        TerminalTransactionStatus.IN_PROGRESS,
+                        PinelabsTransactionStatus.STARTED,
+                        PinelabsTransactionStatus.IN_PROGRESS,
                     ],
                     invoice__isnull=True,
                 ),
@@ -170,7 +169,7 @@ class PinelabsTerminalTransaction(BaseModel):
     def mark_uploaded(self, plutus_reference_id: str):
         """Mark as uploaded to Pine Labs and transition to in_progress."""
         self.plutus_transaction_reference_id = plutus_reference_id
-        self.status = TerminalTransactionStatus.IN_PROGRESS
+        self.status = PinelabsTransactionStatus.IN_PROGRESS
         self.save(
             update_fields=[
                 "plutus_transaction_reference_id",
@@ -181,12 +180,12 @@ class PinelabsTerminalTransaction(BaseModel):
 
     def mark_completed(self):
         """Mark transaction as successfully completed."""
-        self.status = TerminalTransactionStatus.COMPLETED
+        self.status = PinelabsTransactionStatus.COMPLETED
         self.save(update_fields=["status", "modified_date"])
 
     def is_active(self) -> bool:
         """Check if transaction is active (started or in_progress)."""
         return self.status in [
-            TerminalTransactionStatus.STARTED,
-            TerminalTransactionStatus.IN_PROGRESS,
+            PinelabsTransactionStatus.STARTED,
+            PinelabsTransactionStatus.IN_PROGRESS,
         ]
