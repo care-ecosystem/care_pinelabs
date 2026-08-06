@@ -34,8 +34,9 @@ info:
       linked via `PinelabsPosTerminal`.
     - `gateway.upload_transaction`'s `terminal` field now refers to a
       `PinelabsPosTerminal` id instead of the old `PinelabsTerminal` id.
-    - `PinelabsTransaction` remains an internal lock/idempotency table
-      with no API — not exposed for querying.
+    - `PinelabsTransaction` is now also exposed read-only for querying
+      via `GET /pinelabs_transactions/`, alongside its existing role as an
+      internal lock/idempotency table.
 
   version: 2.0.0
 
@@ -55,6 +56,13 @@ tags:
       and retrieved via the dedicated /pos-terminals/ sub-endpoint.
   - name: Gateway
     description: Upload, poll, refresh, and cancel Pine Labs payment transactions
+  - name: Pinelabs Transaction
+    description: |
+      Read-only listing of Pine Labs terminal transactions (the
+      `PinelabsTransaction` lock/idempotency table), filterable by
+      terminal, transaction number, status, payment mode, location, and
+      created_by. Each row corresponds to a completed-or-in-progress
+      transaction with a linked `PaymentReconciliation`.
 
 security:
   - BearerAuth: []
@@ -356,6 +364,131 @@ paths:
                 errors:
                   - type: "conflict"
                     msg: "Device POS Terminal 01 is already linked to another Pinelabs POS terminal"
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  # ---------- Pinelabs Transaction ----------
+  /pinelabs_transactions/:
+    get:
+      tags:
+        - Pinelabs Transaction
+      summary: List Pine Labs terminal transactions
+      description: |
+        Read-only list of `PinelabsTransaction` rows scoped to a facility,
+        restricted to rows with a linked `PaymentReconciliation` (i.e.
+        transactions past the initial `started` lock state). Response shape
+        mirrors the core payment_reconciliation list API's mechanics
+        (pagination, ordering) but returns a trimmed set of fields sourced
+        from whichever model each filter is bound to — `status`/`method`
+        come from the terminal transaction itself (not the linked
+        reconciliation's `status`/`method`, which use different value
+        domains), while `location`/`created_by` come from the linked
+        reconciliation (no equivalent field on the transaction).
+      operationId: listPinelabsTransactions
+      parameters:
+        - name: facility_id
+          in: query
+          required: true
+          description: CARE facility id (UUID) to scope the list to
+          schema:
+            type: string
+            format: uuid
+        - name: offset
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+        - name: ordering
+          in: query
+          description: Sort field. Prefix with `-` for descending.
+          schema:
+            type: string
+            enum: [created_date, -created_date, modified_date, -modified_date]
+        - name: created_date_after
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: created_date_before
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: status
+          in: query
+          description: PinelabsTransaction status (not the linked reconciliation's status)
+          schema:
+            type: string
+            enum: [started, in_progress, completed]
+        - name: method
+          in: query
+          description: Maps to PinelabsTransaction.payment_mode
+          schema:
+            $ref: '#/components/schemas/AllowedPaymentMode'
+        - name: location
+          in: query
+          description: Linked reconciliation's location id (UUID)
+          schema:
+            type: string
+            format: uuid
+        - name: created_by
+          in: query
+          description: Linked reconciliation's created_by user id (UUID)
+          schema:
+            type: string
+            format: uuid
+        - name: terminal
+          in: query
+          description: PinelabsPosTerminal id (UUID)
+          schema:
+            type: string
+            format: uuid
+        - name: transaction_number
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Paginated list of Pine Labs terminal transactions
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - count
+                  - results
+                properties:
+                  count:
+                    type: integer
+                  next:
+                    type: string
+                    nullable: true
+                  previous:
+                    type: string
+                    nullable: true
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PinelabsTransaction'
+        '400':
+          description: Missing required facility_id query parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Facility not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorEnvelope'
         '500':
           $ref: '#/components/responses/InternalServerError'
 
@@ -905,6 +1038,70 @@ components:
             - $ref: '#/components/schemas/UserSummary'
           nullable: true
           readOnly: true
+        created_date:
+          type: string
+          format: date-time
+          readOnly: true
+          example: "2026-05-19T19:29:35.868682+05:30"
+        modified_date:
+          type: string
+          format: date-time
+          readOnly: true
+          example: "2026-05-19T19:29:35.868682+05:30"
+
+    # ===================== Pinelabs Transaction =====================
+    PinelabsTransactionStatus:
+      type: string
+      enum: [started, in_progress, completed]
+      description: |
+        Lifecycle of the PinelabsTransaction lock, distinct from
+        ReconciliationStatus. `started` = device blocked, calling Pine Labs;
+        `in_progress` = upload succeeded, waiting for customer;
+        `completed` = payment reached a terminal state.
+
+    PinelabsTransaction:
+      type: object
+      description: |
+        Trimmed view of a PinelabsTransaction. Only rows with a linked
+        PaymentReconciliation are listed. `status`/`method` are sourced from
+        the terminal transaction itself; `location`/`created_by` are sourced
+        from the linked PaymentReconciliation.
+      required:
+        - id
+        - terminal
+        - transaction_number
+        - status
+        - method
+        - created_date
+        - modified_date
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        terminal:
+          type: string
+          format: uuid
+          description: PinelabsPosTerminal id
+        transaction_number:
+          type: string
+        status:
+          $ref: '#/components/schemas/PinelabsTransactionStatus'
+        method:
+          allOf:
+            - $ref: '#/components/schemas/AllowedPaymentMode'
+          description: PinelabsTransaction.payment_mode
+        location:
+          type: string
+          format: uuid
+          nullable: true
+          description: Linked reconciliation's location id
+        created_by:
+          allOf:
+            - $ref: '#/components/schemas/UserSummary'
+          nullable: true
+          readOnly: true
+          description: Linked reconciliation's created_by
         created_date:
           type: string
           format: date-time
