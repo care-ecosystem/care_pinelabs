@@ -11,7 +11,9 @@ from care_pinelabs.models.pinelabs_transaction import PinelabsTransaction
 
 
 class PinelabsTransactionFilters(filters.FilterSet):
-    status = filters.CharFilter(field_name="status", lookup_expr="iexact")
+    status = filters.CharFilter(
+        field_name="payment_reconciliation__outcome", lookup_expr="iexact"
+    )
     method = filters.CharFilter(field_name="payment_mode")
     location = filters.UUIDFilter(
         field_name="payment_reconciliation__location__external_id"
@@ -46,5 +48,10 @@ class PinelabsTransactionViewSet(EMRListMixin, EMRBaseViewSet):
             super()
             .get_queryset()
             .filter(payment_reconciliation__isnull=False, terminal__config__facility=facility)
-            .select_related("terminal", "payment_reconciliation__location")
+            .select_related(
+                "terminal",
+                "payment_reconciliation__location",
+                "payment_reconciliation__target_invoice",
+                "payment_reconciliation__account",
+            )
         )

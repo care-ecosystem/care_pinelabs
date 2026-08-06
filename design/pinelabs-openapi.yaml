@@ -60,9 +60,9 @@ tags:
     description: |
       Read-only listing of Pine Labs terminal transactions (the
       `PinelabsTransaction` lock/idempotency table), filterable by
-      terminal, transaction number, status, payment mode, location, and
-      created_by. Each row has a linked `PaymentReconciliation` and may be
-      in any status: `started`, `in_progress`, or `completed`.
+      terminal, transaction number, status (linked reconciliation's
+      outcome), payment mode, location, and created_by. Each row has a
+      linked `PaymentReconciliation`.
 
 security:
   - BearerAuth: []
@@ -376,15 +376,14 @@ paths:
       description: |
         Read-only list of `PinelabsTransaction` rows scoped to a facility,
         restricted to rows with a linked `PaymentReconciliation` (linked as
-        soon as upload begins, so rows may be `started`, `in_progress`, or
-        `completed`). Response shape mirrors the core payment_reconciliation
-        list API's mechanics
-        (pagination, ordering) but returns a trimmed set of fields sourced
-        from whichever model each filter is bound to — `status`/`method`
-        come from the terminal transaction itself (not the linked
-        reconciliation's `status`/`method`, which use different value
-        domains), while `location`/`created_by` come from the linked
-        reconciliation (no equivalent field on the transaction).
+        soon as upload begins). Response shape mirrors the core
+        payment_reconciliation list API's mechanics (pagination, ordering)
+        but returns a trimmed set of fields sourced from whichever model
+        each filter is bound to — `method`/`transaction_id` come from the
+        terminal transaction itself, while `status` (the reconciliation's
+        `outcome`), `amount`, `target_invoice`, `reference_number`,
+        `tendered_amount`, `location`/`created_by` come from the linked
+        reconciliation.
       operationId: listPinelabsTransactions
       parameters:
         - name: facility_id
@@ -420,10 +419,9 @@ paths:
             format: date-time
         - name: status
           in: query
-          description: PinelabsTransaction status (not the linked reconciliation's status)
+          description: Linked reconciliation's outcome
           schema:
-            type: string
-            enum: [started, in_progress, completed]
+            $ref: '#/components/schemas/ReconciliationOutcome'
         - name: method
           in: query
           description: Maps to PinelabsTransaction.payment_mode
@@ -1052,27 +1050,19 @@ components:
           example: "2026-05-19T19:29:35.868682+05:30"
 
     # ===================== Pinelabs Transaction =====================
-    PinelabsTransactionStatus:
-      type: string
-      enum: [started, in_progress, completed]
-      description: |
-        Lifecycle of the PinelabsTransaction lock, distinct from
-        ReconciliationStatus. `started` = device blocked, calling Pine Labs;
-        `in_progress` = upload succeeded, waiting for customer;
-        `completed` = payment reached a terminal state.
-
     PinelabsTransaction:
       type: object
       description: |
         Trimmed view of a PinelabsTransaction. Only rows with a linked
-        PaymentReconciliation are listed. `status`/`method` are sourced from
-        the terminal transaction itself; `location`/`created_by` are sourced
-        from the linked PaymentReconciliation.
+        PaymentReconciliation are listed. `method`/`transaction_id` are
+        sourced from the terminal transaction itself; `status` (the linked
+        reconciliation's outcome), `amount`, `account`, `target_invoice`,
+        `reference_number`, `tendered_amount`, `location`, `created_by` are
+        sourced from the linked PaymentReconciliation.
       required:
         - id
         - terminal
         - transaction_number
-        - status
         - method
         - created_date
         - modified_date
@@ -1087,12 +1077,43 @@ components:
           description: PinelabsPosTerminal id
         transaction_number:
           type: string
+        transaction_id:
+          type: string
+          nullable: true
+          description: Pine Labs PTRID (PinelabsTransaction.plutus_transaction_reference_id)
         status:
-          $ref: '#/components/schemas/PinelabsTransactionStatus'
+          allOf:
+            - $ref: '#/components/schemas/ReconciliationOutcome'
+          nullable: true
+          description: Linked reconciliation's outcome
         method:
           allOf:
             - $ref: '#/components/schemas/AllowedPaymentMode'
           description: PinelabsTransaction.payment_mode
+        amount:
+          type: number
+          format: decimal
+          nullable: true
+          description: Linked reconciliation's amount
+        account:
+          allOf:
+            - $ref: '#/components/schemas/AccountSummary'
+          nullable: true
+          description: Linked reconciliation's account
+        target_invoice:
+          allOf:
+            - $ref: '#/components/schemas/InvoiceSummary'
+          nullable: true
+          description: Linked reconciliation's target_invoice
+        reference_number:
+          type: string
+          nullable: true
+          description: Linked reconciliation's reference_number
+        tendered_amount:
+          type: number
+          format: decimal
+          nullable: true
+          description: Linked reconciliation's tendered_amount
         location:
           type: string
           format: uuid
@@ -1263,6 +1284,8 @@ components:
         id:
           type: string
           format: uuid
+        number:
+          type: string
         status:
           type: string
 
