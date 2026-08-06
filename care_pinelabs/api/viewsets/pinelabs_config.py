@@ -76,14 +76,12 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
 
     def _get_device(self, device_id, facility) -> Device:
         device = get_object_or_404(Device, external_id=device_id)
+        if device.facility_id != facility.id:
+            raise ValidationError(f"Device {device_id} does not belong to this facility")
         if device.care_type != "pos-terminal":
             raise ValidationError(f"Device {device.registered_name} is not a pos-terminal")
         if device.status != "active":
             raise ValidationError(f"Device {device.registered_name} is not active")
-        if device.facility_id != facility.id:
-            raise ValidationError(
-                f"Device {device.registered_name} does not belong to this facility"
-            )
         return device
 
     @extend_schema(request=PinelabsConfigCreateSpec, responses=PinelabsConfigReadSpec)
@@ -225,6 +223,13 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                 new_devices_by_id = {}
                 for pos_terminal in request_data.pos_terminals:
                     if pos_terminal.device_id in linked_device_ids:
+                        device = get_object_or_404(
+                            Device, external_id=pos_terminal.device_id
+                        )
+                        if device.status != "active":
+                            raise ValidationError(
+                                f"Device {device.registered_name} is not active"
+                            )
                         continue
                     device = self._get_device(pos_terminal.device_id, instance.facility)
                     if (

@@ -6,7 +6,6 @@ from rest_framework.filters import OrderingFilter
 from care.emr.api.viewsets.base import EMRBaseViewSet, EMRListMixin
 from care.facility.models.facility import Facility
 from care.security.authorization.base import AuthorizationController
-from care.utils.shortcuts import get_object_or_404
 from care_pinelabs.api.specs.pinelabs_transaction import PinelabsTransactionReadSpec
 from care_pinelabs.models.pinelabs_transaction import PinelabsTransaction
 
@@ -37,8 +36,8 @@ class PinelabsTransactionViewSet(EMRListMixin, EMRBaseViewSet):
         facility_id = self.request.query_params.get("facility_id")
         if not facility_id:
             raise ValidationError("facility_id is a required query parameter")
-        facility = get_object_or_404(Facility, external_id=facility_id)
-        if not AuthorizationController.call(
+        facility = Facility.objects.filter(external_id=facility_id).first()
+        if not facility or not AuthorizationController.call(
             "can_read_payment_reconciliation_in_facility", self.request.user, facility
         ):
             raise PermissionDenied("Cannot read payment reconciliation")

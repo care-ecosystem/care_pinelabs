@@ -77,12 +77,14 @@ def poll_pinelabs_transaction_status(
         )
         return
 
+    # Recovery lookup for an already in-flight transaction: don't require the
+    # device to still be active, or polling would get permanently stuck for a
+    # transaction started on a terminal that was later deactivated.
     terminal = (
         PinelabsPosTerminal.objects.filter(
             external_id=terminal_external_id,
             device__deleted=False,
             config__deleted=False,
-            device__status="active",
         )
         .select_related("device", "config")
         .first()
@@ -92,6 +94,15 @@ def poll_pinelabs_transaction_status(
             "Pinelabs terminal %s for PaymentReconciliation %s not found",
             terminal_external_id,
             payment_reconciliation_id,
+        )
+        if attempt >= _max_poll_attempts():
+            return
+        poll_pinelabs_transaction_status.apply_async(
+            kwargs={
+                "payment_reconciliation_id": payment_reconciliation_id,
+                "attempt": attempt + 1,
+            },
+            countdown=_poll_interval_seconds(),
         )
         return
 
