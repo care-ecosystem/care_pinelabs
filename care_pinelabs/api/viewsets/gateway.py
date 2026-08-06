@@ -60,10 +60,20 @@ class GatewayViewSet(GenericViewSet):
         return pinelabs_exception_handler
 
     def _get_terminal(self, external_id) -> PinelabsPosTerminal:
+        """Look up a terminal for starting a new upload; requires an active device."""
         return get_object_or_404(
             PinelabsPosTerminal.objects.select_related(
                 "config__facility", "device"
-            ).filter(deleted=False, device__deleted=False, config__deleted=False),
+            ).filter(device__deleted=False, config__deleted=False, device__status="active"),
+            external_id=external_id,
+        )
+
+    def _get_terminal_for_recovery(self, external_id) -> PinelabsPosTerminal:
+        """Look up a terminal to act on an already in-flight transaction."""
+        return get_object_or_404(
+            PinelabsPosTerminal.objects.select_related(
+                "config__facility", "device"
+            ).filter(device__deleted=False, config__deleted=False),
             external_id=external_id,
         )
 
@@ -423,7 +433,7 @@ class GatewayViewSet(GenericViewSet):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        terminal = self._get_terminal(terminal_external_id)
+        terminal = self._get_terminal_for_recovery(terminal_external_id)
 
         plutus_response = PlutusCloudService().cancel_transaction(
             CancelTransactionRequestData(

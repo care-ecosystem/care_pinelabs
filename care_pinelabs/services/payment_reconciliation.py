@@ -396,7 +396,8 @@ def refresh_payment_reconciliation_status(
     # 3. Get terminal configuration
     terminal = get_object_or_404(
         PinelabsPosTerminal.objects.select_related("device", "config").filter(
-            deleted=False, device__deleted=False, config__deleted=False
+            device__deleted=False,
+            config__deleted=False,
         ),
         external_id=terminal_external_id,
     )
