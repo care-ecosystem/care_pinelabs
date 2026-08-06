@@ -1,9 +1,9 @@
 from django.db import IntegrityError, transaction
 from rest_framework.exceptions import ValidationError
 
-from care_pinelabs.models.terminal_transaction import (
-    PinelabsTerminalTransaction,
-    TerminalTransactionStatus,
+from care_pinelabs.models.pinelabs_transaction import (
+    PinelabsTransaction,
+    PinelabsTransactionStatus,
 )
 
 
@@ -33,7 +33,7 @@ def acquire_terminal_lock(
         invoice: Invoice instance (optional)
 
     Returns:
-        PinelabsTerminalTransaction instance with status="started"
+        PinelabsTransaction instance with status="started"
 
     Raises:
         ValidationError: If any constraint violated (terminal busy, invoice busy, etc.)
@@ -45,13 +45,13 @@ def acquire_terminal_lock(
         with transaction.atomic():
             # Create lock record with "started" status
             # This will fail with IntegrityError if any constraint violated
-            lock = PinelabsTerminalTransaction.objects.create(
+            lock = PinelabsTransaction.objects.create(
                 terminal=terminal,
                 account=account,
                 invoice=invoice,
                 transaction_number=transaction_number,
                 payment_mode=payment_mode,
-                status=TerminalTransactionStatus.STARTED,  # Device blocked
+                status=PinelabsTransactionStatus.STARTED,  # Device blocked
             )
             return lock
 
@@ -60,11 +60,11 @@ def acquire_terminal_lock(
 
         # Constraint 1: Terminal already has active transaction
         if "unique_active_transaction_per_terminal" in error_str:
-            blocking = PinelabsTerminalTransaction.objects.filter(
+            blocking = PinelabsTransaction.objects.filter(
                 terminal=terminal,
                 status__in=[
-                    TerminalTransactionStatus.STARTED,
-                    TerminalTransactionStatus.IN_PROGRESS,
+                    PinelabsTransactionStatus.STARTED,
+                    PinelabsTransactionStatus.IN_PROGRESS,
                 ],
             ).first()
 
@@ -82,11 +82,11 @@ def acquire_terminal_lock(
         # Constraint 2: Invoice already has active payment
         elif "unique_active_payment_per_invoice" in error_str:
             if invoice:
-                blocking = PinelabsTerminalTransaction.objects.filter(
+                blocking = PinelabsTransaction.objects.filter(
                     invoice=invoice,
                     status__in=[
-                        TerminalTransactionStatus.STARTED,
-                        TerminalTransactionStatus.IN_PROGRESS,
+                        PinelabsTransactionStatus.STARTED,
+                        PinelabsTransactionStatus.IN_PROGRESS,
                     ],
                 ).first()
 
@@ -107,12 +107,12 @@ def acquire_terminal_lock(
 
         # Constraint 3: Account already has active payment (when no invoice)
         elif "unique_active_payment_per_account" in error_str:
-            blocking = PinelabsTerminalTransaction.objects.filter(
+            blocking = PinelabsTransaction.objects.filter(
                 account=account,
                 invoice__isnull=True,
                 status__in=[
-                    TerminalTransactionStatus.STARTED,
-                    TerminalTransactionStatus.IN_PROGRESS,
+                    PinelabsTransactionStatus.STARTED,
+                    PinelabsTransactionStatus.IN_PROGRESS,
                 ],
             ).first()
 
@@ -129,7 +129,7 @@ def acquire_terminal_lock(
 
         # Constraint 4: Transaction number already exists (idempotency)
         elif "unique_transaction_number" in error_str:
-            existing = PinelabsTerminalTransaction.objects.get(
+            existing = PinelabsTransaction.objects.get(
                 transaction_number=transaction_number
             )
             raise ValidationError(
@@ -149,12 +149,12 @@ def get_active_terminal_transaction(terminal):
         terminal: PinelabsPosTerminal instance
 
     Returns:
-        PinelabsTerminalTransaction or None
+        PinelabsTransaction or None
     """
-    return PinelabsTerminalTransaction.objects.filter(
+    return PinelabsTransaction.objects.filter(
         terminal=terminal,
         status__in=[
-            TerminalTransactionStatus.STARTED,
-            TerminalTransactionStatus.IN_PROGRESS,
+            PinelabsTransactionStatus.STARTED,
+            PinelabsTransactionStatus.IN_PROGRESS,
         ],
     ).first()
