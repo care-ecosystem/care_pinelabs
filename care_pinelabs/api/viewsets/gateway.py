@@ -69,12 +69,7 @@ class GatewayViewSet(GenericViewSet):
         )
 
     def _get_terminal_for_recovery(self, external_id) -> PinelabsPosTerminal:
-        """Look up a terminal to act on an already in-flight transaction.
-
-        Unlike `_get_terminal`, this does not require the device to still be
-        active — a device deactivated after upload shouldn't block cancelling
-        or refreshing a transaction it already started.
-        """
+        """Look up a terminal to act on an already in-flight transaction."""
         return get_object_or_404(
             PinelabsPosTerminal.objects.select_related(
                 "config__facility", "device"

@@ -394,9 +394,6 @@ def refresh_payment_reconciliation_status(
         raise ValidationError("PaymentReconciliation has no pinelabs metadata")
 
     # 3. Get terminal configuration
-    # Recovery lookup for an already in-flight transaction: don't require the
-    # device to still be active, or a transaction on a deactivated terminal
-    # could never be refreshed again.
     terminal = get_object_or_404(
         PinelabsPosTerminal.objects.select_related("device", "config").filter(
             device__deleted=False,

@@ -77,9 +77,6 @@ def poll_pinelabs_transaction_status(
         )
         return
 
-    # Recovery lookup for an already in-flight transaction: don't require the
-    # device to still be active, or polling would get permanently stuck for a
-    # transaction started on a terminal that was later deactivated.
     terminal = (
         PinelabsPosTerminal.objects.filter(
             external_id=terminal_external_id,
