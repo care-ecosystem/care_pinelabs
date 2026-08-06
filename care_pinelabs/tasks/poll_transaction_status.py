@@ -80,9 +80,9 @@ def poll_pinelabs_transaction_status(
     terminal = (
         PinelabsPosTerminal.objects.filter(
             external_id=terminal_external_id,
-            deleted=False,
             device__deleted=False,
             config__deleted=False,
+            device__status="active",
         )
         .select_related("device", "config")
         .first()

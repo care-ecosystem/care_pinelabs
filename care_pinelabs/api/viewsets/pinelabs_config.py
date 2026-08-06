@@ -77,9 +77,13 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
     def _get_device(self, device_id, facility) -> Device:
         device = get_object_or_404(Device, external_id=device_id)
         if device.care_type != "pos-terminal":
-            raise ValidationError(f"Device {device_id} is not a pos-terminal")
+            raise ValidationError(f"Device {device.registered_name} is not a pos-terminal")
+        if device.status != "active":
+            raise ValidationError(f"Device {device.registered_name} is not active")
         if device.facility_id != facility.id:
-            raise ValidationError(f"Device {device_id} does not belong to this facility")
+            raise ValidationError(
+                f"Device {device.registered_name} does not belong to this facility"
+            )
         return device
 
     @extend_schema(request=PinelabsConfigCreateSpec, responses=PinelabsConfigReadSpec)
@@ -174,9 +178,9 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
     def pos_terminals(self, request, *args, **kwargs):
         instance = self.get_object()
         self._authorize_facility(instance.facility)
-        terminals = PinelabsPosTerminal.objects.filter(config=instance).select_related(
-            "device", "created_by", "updated_by"
-        )
+        terminals = PinelabsPosTerminal.objects.filter(
+            config=instance, device__deleted=False, device__status="active"
+        ).select_related("device", "created_by", "updated_by")
 
         if request.query_params.get("mine", "false").lower() == "true":
             facility_organizations = FacilityOrganization.objects.filter(
@@ -246,9 +250,9 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                 "This device is already linked to another Pinelabs POS terminal"
             )
 
-        terminals = PinelabsPosTerminal.objects.filter(config=instance).select_related(
-            "device", "created_by", "updated_by"
-        )
+        terminals = PinelabsPosTerminal.objects.filter(
+            config=instance, device__deleted=False, device__status="active"
+        ).select_related("device", "created_by", "updated_by")
         return Response(
             [PinelabsPosTerminalReadSpec.serialize(t).to_json() for t in terminals]
         )
