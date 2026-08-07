@@ -77,7 +77,6 @@ plugs = [care_pinelabs_plugin]
 
 The following configurations variables are available for Care Pinelabs:
 
-- `PINELABS_MERCHANT_ID`: MERCHANT ID provided by Pinelabs, used for authentication
 - `PINELABS_SECURITY_TOKEN`: Security token provided by Pinelabs, used for authentication
 
 The plugin will try to find the API key from the config first and then from the environment variable.
