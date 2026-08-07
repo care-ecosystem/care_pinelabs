@@ -123,6 +123,8 @@ def poll_pinelabs_transaction_status(
             payment_reconciliation_id,
             attempt,
         )
+        if hasattr(instance, "terminal_transaction") and instance.terminal_transaction:
+            instance.terminal_transaction.mark_timed_out()
         return
 
     poll_pinelabs_transaction_status.apply_async(

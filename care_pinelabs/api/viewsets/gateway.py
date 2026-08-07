@@ -1,5 +1,6 @@
 import logging
 
+import requests
 from django.db import transaction
 from django.utils import timezone
 from drf_spectacular.utils import extend_schema
@@ -82,12 +83,15 @@ class GatewayViewSet(GenericViewSet):
 
     @staticmethod
     def _serialize_reconciliation(instance: PaymentReconciliation) -> dict:
-        return PaymentReconciliationReadSpec.serialize(instance).to_json()
+        serialized = PaymentReconciliationReadSpec.serialize(instance).to_json()
+        if hasattr(instance, "terminal_transaction") and instance.terminal_transaction:
+            serialized["status"] = instance.terminal_transaction.status
+        return serialized
 
     @staticmethod
     def _serialize_reconciliation_with_meta(instance: PaymentReconciliation) -> dict:
         """Serialize reconciliation including meta field for Pine Labs endpoints."""
-        serialized = PaymentReconciliationReadSpec.serialize(instance).to_json()
+        serialized = GatewayViewSet._serialize_reconciliation(instance)
         # Explicitly include meta field for Pine Labs gateway endpoints
         serialized["meta"] = instance.meta or {}
         return serialized
@@ -233,8 +237,8 @@ class GatewayViewSet(GenericViewSet):
                         plutus_response.response_code != PLUTUS_RESPONSE_CODE_APPROVED
                         or plutus_response.transaction_reference_id is None
                     ):
-                        # Upload failed - mark terminal transaction as completed
-                        terminal_txn.mark_completed()
+                        # Upload failed - mark terminal transaction as failed
+                        terminal_txn.mark_failed()
 
                         # Mark payment reconciliation as ERROR
                         reconciliation.status = PaymentReconciliationStatusOptions.cancelled.value
@@ -293,8 +297,11 @@ class GatewayViewSet(GenericViewSet):
 
                 except Exception as e:
                     logger.error("Pine Labs API call failed: %s", str(e), exc_info=True)
-                    # Mark terminal transaction as completed so terminal is freed
-                    terminal_txn.mark_completed()
+                    # Mark terminal transaction so terminal is freed
+                    if isinstance(e, requests.exceptions.Timeout):
+                        terminal_txn.mark_timed_out()
+                    else:
+                        terminal_txn.mark_failed()
 
                     # Mark payment reconciliation as ERROR
                     reconciliation.status = PaymentReconciliationStatusOptions.cancelled.value

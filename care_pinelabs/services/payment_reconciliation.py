@@ -193,12 +193,18 @@ def apply_status_to_reconciliation(
 
     instance.save()
 
-    # Mark terminal transaction as completed if payment reached terminal state
+    # Mark terminal transaction as completed/cancelled if payment reached terminal state
     is_terminal_state = new_outcome != PaymentReconciliationOutcomeOptions.queued
     if is_terminal_state:
         # Check if this payment has a linked terminal transaction
         if hasattr(instance, "terminal_transaction") and instance.terminal_transaction:
-            instance.terminal_transaction.mark_completed()
+            terminal_txn = instance.terminal_transaction
+            if new_outcome == PaymentReconciliationOutcomeOptions.complete:
+                terminal_txn.mark_completed()
+            elif new_status == PaymentReconciliationStatusOptions.cancelled:
+                terminal_txn.mark_cancelled()
+            else:
+                terminal_txn.mark_failed()
 
     if new_outcome == PaymentReconciliationOutcomeOptions.complete:
         rebalance_account_task(instance.account_id)
@@ -344,6 +350,10 @@ def cancel_payment_reconciliation(
     if meta:
         instance.meta = {**(instance.meta or {}), **meta}
     instance.save()
+
+    if hasattr(instance, "terminal_transaction") and instance.terminal_transaction:
+        instance.terminal_transaction.mark_cancelled()
+
     rebalance_account_task(instance.account_id)
     return instance
 
