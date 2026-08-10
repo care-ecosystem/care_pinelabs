@@ -357,9 +357,9 @@ class GatewayViewSet(GenericViewSet):
         reconciliation = self._get_reconciliation(request_data.payment_reconciliation)
 
         if not AuthorizationController.call(
-            "can_perform_pinelabs_transaction", request.user, reconciliation.facility
+            "can_read_pinelabs_transaction", request.user, reconciliation.facility
         ):
-            raise PermissionDenied("Cannot perform pinelabs transaction")
+            raise PermissionDenied("Cannot read pinelabs transaction")
 
         # Authorize: user must have read permission
         authorize_payment_reconciliation_read(reconciliation, request.user)
