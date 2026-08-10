@@ -5,7 +5,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
-from care.emr.api.viewsets.base import EMRBaseViewSet, EMRRetrieveMixin
+from care.emr.api.viewsets.base import EMRBaseViewSet
 from care.emr.models.device import Device
 from care.emr.models.organization import FacilityOrganization, FacilityOrganizationUser
 from care.facility.models import Facility
@@ -33,7 +33,7 @@ PinelabsPosTerminalReadSpecList = list[PinelabsPosTerminalReadSpec]
 
 
 @extend_schema(tags=["Pinelabs: Pinelabs Config"])
-class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
+class PinelabsConfigViewSet(EMRBaseViewSet):
     database_model = PinelabsConfig
     pydantic_model = PinelabsConfigCreateSpec
     pydantic_read_model = PinelabsConfigReadSpec
@@ -54,8 +54,18 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
                 "You are not authorized to manage Pinelabs config for this facility"
             )
 
-    def authorize_retrieve(self, instance):
-        self._authorize_facility(instance.facility)
+    def _authorize_facility_manage_or_perform(self, facility):
+        if not (
+            AuthorizationController.call(
+                "can_manage_pinelabs_config", self.request.user, facility
+            )
+            or AuthorizationController.call(
+                "can_perform_pinelabs_transaction", self.request.user, facility
+            )
+        ):
+            raise PermissionDenied(
+                "You are not authorized to view Pinelabs config for this facility"
+            )
 
     @extend_schema(responses=PinelabsConfigReadSpec)
     def list(self, request, *args, **kwargs):
@@ -63,7 +73,7 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
         if not facility_id:
             raise ValidationError("facility_id is a required query parameter")
         facility = get_object_or_404(Facility, external_id=facility_id)
-        self._authorize_facility(facility)
+        self._authorize_facility_manage_or_perform(facility)
         instance = get_object_or_404(self.get_queryset(), facility=facility)
         return Response(PinelabsConfigReadSpec.serialize(instance).to_json())
 
@@ -175,7 +185,7 @@ class PinelabsConfigViewSet(EMRRetrieveMixin, EMRBaseViewSet):
     @action(detail=True, methods=["get"], url_path="pos-terminals")
     def pos_terminals(self, request, *args, **kwargs):
         instance = self.get_object()
-        self._authorize_facility(instance.facility)
+        self._authorize_facility_manage_or_perform(instance.facility)
         terminals = PinelabsPosTerminal.objects.filter(
             config=instance, device__deleted=False, device__status="active"
         ).select_related("device", "created_by", "updated_by")

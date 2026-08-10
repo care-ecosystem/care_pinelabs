@@ -74,7 +74,10 @@ paths:
       tags:
         - Health Check
       summary: Ping
-      description: Basic liveness check for the plugin.
+      description: |
+        Basic liveness check for the plugin.
+
+        Permission: none (unauthenticated).
       operationId: pingHealthCheck
       security: []
       responses:
@@ -107,6 +110,8 @@ paths:
         to config fields/payment method mappings, and
         PATCH /pinelabs_config/{id}/pos-terminals/ to link/unlink pos
         terminals (not accepted on create).
+
+        Permission: `can_manage_pinelabs_config` on the facility.
       operationId: createPinelabsConfig
       requestBody:
         required: true
@@ -176,6 +181,9 @@ paths:
         required query parameter, not a path/list lookup — a facility has at
         most one config, so this always returns a single object (or 404),
         never a paginated list.
+
+        Permission: `can_manage_pinelabs_config` OR `can_perform_pinelabs_transaction`
+        on the facility.
       operationId: getPinelabsConfig
       parameters:
         - name: facility_id
@@ -230,6 +238,8 @@ paths:
 
         POS terminals are not managed here — use
         PATCH /pinelabs_config/{id}/pos-terminals/.
+
+        Permission: `can_manage_pinelabs_config` on the facility.
       operationId: updatePinelabsConfig
       parameters:
         - $ref: '#/components/parameters/ConfigId'
@@ -274,6 +284,9 @@ paths:
         Retrieve all active POS terminals linked to this config — looked up
         by the config's own `id`. Not embedded on
         GET /pinelabs_config/?facility_id= — use this endpoint instead.
+
+        Permission: `can_manage_pinelabs_config` OR `can_perform_pinelabs_transaction`
+        on the facility.
       operationId: getPinelabsConfigPosTerminals
       parameters:
         - $ref: '#/components/parameters/ConfigId'
@@ -316,6 +329,8 @@ paths:
         the submitted array are unlinked (soft-deleted), new device_ids
         (existing `emr.Device` records of `care_type=pos-terminal`,
         belonging to this config's facility) are linked.
+
+        Permission: `can_manage_pinelabs_config` on the facility.
       operationId: updatePinelabsConfigPosTerminals
       parameters:
         - $ref: '#/components/parameters/ConfigId'
@@ -384,6 +399,8 @@ paths:
         `outcome`), `amount`, `target_invoice`, `reference_number`,
         `tendered_amount`, `location`/`created_by` come from the linked
         reconciliation.
+
+        Permission: `can_read_pinelabs_transaction` on the facility.
       operationId: listPinelabsTransactions
       parameters:
         - name: facility_id
@@ -482,7 +499,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           description: |
-            Not authorized to read payment reconciliations in this facility.
+            Missing `can_read_pinelabs_transaction` on this facility.
             Also returned for a non-existent facility_id, so callers cannot
             distinguish "facility exists but inaccessible" from "no such facility".
           content:
@@ -504,6 +521,10 @@ paths:
         Pine Labs Plutus Cloud upload API. A Celery task then polls for the
         final status asynchronously — poll `/gateway/transaction_status/` to
         observe updates.
+
+        Permission: `can_perform_pinelabs_transaction` on the facility, plus
+        `can_write_payment_reconciliation_in_facility` (and
+        `can_list_facility_location_obj` if `location` is supplied).
       operationId: uploadTransaction
       requestBody:
         required: true
@@ -555,7 +576,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          description: Not authorized to write payment reconciliations in this facility/location
+          description: Missing `can_perform_pinelabs_transaction`, or not authorized to write payment reconciliations in this facility/location
           content:
             application/json:
               schema:
@@ -586,7 +607,11 @@ paths:
       tags:
         - Gateway
       summary: Get cached transaction status
-      description: Returns the last-known status of a payment reconciliation without calling Pine Labs.
+      description: |
+        Returns the last-known status of a payment reconciliation without calling Pine Labs.
+
+        Permission: `can_read_pinelabs_transaction` on the facility, plus
+        `can_read_payment_reconciliation_in_facility`.
       operationId: getTransactionStatus
       requestBody:
         required: true
@@ -616,7 +641,7 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
-          description: Not authorized to read payment reconciliations in this facility
+          description: Missing `can_read_pinelabs_transaction`, or not authorized to read payment reconciliations in this facility
           content:
             application/json:
               schema:
@@ -634,6 +659,9 @@ paths:
       description: |
         Actively polls the Pine Labs Plutus GetStatus API and updates the
         reconciliation record if the upstream status has changed.
+
+        Permission: `can_perform_pinelabs_transaction` on the facility, plus
+        `can_write_payment_reconciliation_in_facility`.
       operationId: refreshTransactionStatus
       requestBody:
         required: true
@@ -697,6 +725,10 @@ paths:
         the reconciliation `cancelled`/`error`. Within the free-cancel window
         (`PAYMENT_RECONCILIATION_FREE_CANCEL_PERIOD_MINUTES`), requires write
         authorization; after the window, requires destroy authorization.
+
+        Permission: `can_perform_pinelabs_transaction` on the facility, plus
+        `can_write_payment_reconciliation_in_facility` (within the free-cancel
+        window) or `can_destroy_payment_reconciliation_in_facility` (after).
       operationId: cancelTransaction
       requestBody:
         required: true

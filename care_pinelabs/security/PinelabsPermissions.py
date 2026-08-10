@@ -11,3 +11,15 @@ class PinelabsPermissions(enum.Enum):
         PermissionContext.FACILITY,
         [FACILITY_ADMIN_ROLE, ADMIN_ROLE],
     )
+    can_perform_pinelabs_transaction = Permission(
+        "Can Perform Pinelabs Transaction In Facility",
+        "",
+        PermissionContext.FACILITY,
+        [FACILITY_ADMIN_ROLE, ADMIN_ROLE],
+    )
+    can_read_pinelabs_transaction = Permission(
+        "Can Read Pinelabs Transaction In Facility",
+        "",
+        PermissionContext.FACILITY,
+        [FACILITY_ADMIN_ROLE, ADMIN_ROLE],
+    )
