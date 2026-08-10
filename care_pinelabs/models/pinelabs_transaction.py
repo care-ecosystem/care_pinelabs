@@ -12,6 +12,9 @@ class PinelabsTransactionStatus(models.TextChoices):
     STARTED = "started", "Started"  # Device blocked, calling Pine Labs
     IN_PROGRESS = "in_progress", "In Progress"  # Upload succeeded, waiting for customer
     COMPLETED = "completed", "Completed"  # Payment successful
+    CANCELLED = "cancelled", "Cancelled"  #Payment Cancelled 
+    TIMED_OUT = "timeout", "Timeout"      #API_Timeout or Auto Cancelled
+    FAILED = "failed", "Failed"           #Fallback Failure
 
 
 class PinelabsTransaction(BaseModel):
@@ -181,6 +184,21 @@ class PinelabsTransaction(BaseModel):
     def mark_completed(self):
         """Mark transaction as successfully completed."""
         self.status = PinelabsTransactionStatus.COMPLETED
+        self.save(update_fields=["status", "modified_date"])
+
+    def mark_cancelled(self):
+        """Mark transaction as cancelled."""
+        self.status = PinelabsTransactionStatus.CANCELLED
+        self.save(update_fields=["status", "modified_date"])
+
+    def mark_timed_out(self):
+        """Mark transaction as timed out."""
+        self.status = PinelabsTransactionStatus.TIMED_OUT
+        self.save(update_fields=["status", "modified_date"])
+
+    def mark_failed(self):
+        """Fallback status for terminal outcomes that aren't a success, cancellation, or timeout."""
+        self.status = PinelabsTransactionStatus.FAILED
         self.save(update_fields=["status", "modified_date"])
 
     def is_active(self) -> bool:

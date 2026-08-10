@@ -4,14 +4,10 @@ from decimal import Decimal
 from pydantic import UUID4
 
 from care.emr.resources.base import EMRResource
-from care.emr.resources.payment_reconciliation.spec import (
-    PaymentReconciliationOutcomeOptions,
-)
 from care_pinelabs.models.pinelabs_transaction import (
     PinelabsTransaction,
     PinelabsTransactionStatus,
 )
-
 
 class PinelabsTransactionReadSpec(EMRResource):
     __model__ = PinelabsTransaction
@@ -21,6 +17,7 @@ class PinelabsTransactionReadSpec(EMRResource):
     terminal: UUID4 | None = None
     transaction_number: str
     transaction_id: str | None = None
+    payment_reconciliation: UUID4 | None = None
     method: str
     location: UUID4 | None = None
     amount: Decimal | None = None
@@ -28,7 +25,7 @@ class PinelabsTransactionReadSpec(EMRResource):
     target_invoice: dict | None = None
     reference_number: str | None = None
     tendered_amount: Decimal | None = None
-    status: PaymentReconciliationOutcomeOptions | None = None
+    status: PinelabsTransactionStatus | None = None
     created_by: dict | None = None
     created_date: datetime
     modified_date: datetime
@@ -41,6 +38,9 @@ class PinelabsTransactionReadSpec(EMRResource):
         mapping["transaction_id"] = obj.plutus_transaction_reference_id
 
         reconciliation = obj.payment_reconciliation
+        mapping["payment_reconciliation"] = (
+            reconciliation.external_id if reconciliation else None
+        )
         mapping["location"] = (
             reconciliation.location.external_id
             if reconciliation and reconciliation.location
@@ -69,7 +69,6 @@ class PinelabsTransactionReadSpec(EMRResource):
         mapping["tendered_amount"] = (
             reconciliation.tendered_amount if reconciliation else None
         )
-        mapping["status"] = reconciliation.outcome if reconciliation else None
         mapping["created_by"] = None
         if reconciliation and reconciliation.created_by_id:
             from care.emr.resources.base import model_from_cache
