@@ -127,6 +127,11 @@ class GatewayViewSet(GenericViewSet):
         terminal = self._get_terminal(request_data.terminal)
         user = request.user
 
+        if not AuthorizationController.call(
+            "can_perform_pinelabs_transaction", user, terminal.config.facility
+        ):
+            raise PermissionDenied("Cannot perform pinelabs transaction")
+
         # Step 1: Authorize and get account/invoice (single fetch)
         try:
             account, invoice = authorize_payment_reconciliation_create(
@@ -351,6 +356,11 @@ class GatewayViewSet(GenericViewSet):
         # Get reconciliation
         reconciliation = self._get_reconciliation(request_data.payment_reconciliation)
 
+        if not AuthorizationController.call(
+            "can_perform_pinelabs_transaction", request.user, reconciliation.facility
+        ):
+            raise PermissionDenied("Cannot perform pinelabs transaction")
+
         # Authorize: user must have read permission
         authorize_payment_reconciliation_read(reconciliation, request.user)
 
@@ -369,6 +379,11 @@ class GatewayViewSet(GenericViewSet):
         """
         request_data = TransactionStatusSpec.model_validate(request.data)
         reconciliation = self._get_reconciliation(request_data.payment_reconciliation)
+
+        if not AuthorizationController.call(
+            "can_perform_pinelabs_transaction", request.user, reconciliation.facility
+        ):
+            raise PermissionDenied("Cannot perform pinelabs transaction")
 
         try:
             reconciliation, status_changed = refresh_payment_reconciliation_status(
@@ -421,6 +436,11 @@ class GatewayViewSet(GenericViewSet):
     def cancel_transaction(self, request):
         request_data = CancelTransactionSpec.model_validate(request.data)
         reconciliation = self._get_reconciliation(request_data.payment_reconciliation)
+
+        if not AuthorizationController.call(
+            "can_perform_pinelabs_transaction", request.user, reconciliation.facility
+        ):
+            raise PermissionDenied("Cannot perform pinelabs transaction")
 
         # Authorize FIRST before any external API calls
         authorize_payment_reconciliation_cancel(reconciliation, request.user)

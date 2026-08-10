@@ -38,9 +38,9 @@ class PinelabsTransactionViewSet(EMRListMixin, EMRBaseViewSet):
             raise ValidationError("facility_id is a required query parameter")
         facility = Facility.objects.filter(external_id=facility_id).first()
         if not facility or not AuthorizationController.call(
-            "can_read_payment_reconciliation_in_facility", self.request.user, facility
+            "can_read_pinelabs_transaction", self.request.user, facility
         ):
-            raise PermissionDenied("Cannot read payment reconciliation")
+            raise PermissionDenied("Cannot read pinelabs transaction")
 
         return (
             super()
