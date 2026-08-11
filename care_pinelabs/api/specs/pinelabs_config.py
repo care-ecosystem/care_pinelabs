@@ -112,6 +112,7 @@ class PinelabsConfigCreateSpec(EMRResource):
     allow_partial_payment: bool = False
     pinelabs_merchant_id: str
     pinelabs_security_token: str
+    meta: dict = {}
     payment_method_mappings: list[PinelabsPaymentMethodMappingWriteSpec] | None = None
 
     @field_validator("payment_method_mappings")
@@ -129,6 +130,7 @@ class PinelabsConfigUpdateSpec(EMRResource):
     allow_partial_payment: bool | None = None
     pinelabs_merchant_id: str | None = None
     pinelabs_security_token: str | None = None
+    meta: dict | None = None
     payment_method_mappings: list[PinelabsPaymentMethodMappingWriteSpec] | None = None
 
     @field_validator("payment_method_mappings")
@@ -173,7 +175,7 @@ class PinelabsConfigReadSpec(EMRResource):
             PinelabsPaymentMethodMappingReadSpec.serialize(m).to_json()
             for m in obj.payment_method_mappings.all()
         ]
-        mapping["meta"] = {"allow_manual_entry": (obj.meta or {}).get("allow_manual_entry")}
+        mapping["meta"] = obj.meta or {}
         cls.serialize_audit_users(mapping, obj)
 
     def to_json(self):

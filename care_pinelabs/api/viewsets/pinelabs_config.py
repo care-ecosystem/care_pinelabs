@@ -115,10 +115,7 @@ class PinelabsConfigViewSet(EMRBaseViewSet):
                 config.default_payment_flow = request_data.default_payment_flow
                 config.allow_advance_payment = request_data.allow_advance_payment
                 config.allow_partial_payment = request_data.allow_partial_payment
-                config.meta = {
-                    **(config.meta or {}),
-                    "allow_manual_entry": request_data.meta.get("allow_manual_entry", False),
-                }
+                config.meta = {**(config.meta or {}), **request_data.meta}
                 config.pinelabs_merchant_id = request_data.pinelabs_merchant_id
                 config.pinelabs_security_token = request_data.pinelabs_security_token
                 config.created_by = request.user
@@ -163,11 +160,8 @@ class PinelabsConfigViewSet(EMRBaseViewSet):
                         setattr(instance, field, value)
                         update_fields.append(field)
 
-                if "allow_manual_entry" in request_data.meta:
-                    instance.meta = {
-                        **(instance.meta or {}),
-                        "allow_manual_entry": request_data.meta["allow_manual_entry"],
-                    }
+                if request_data.meta is not None:
+                    instance.meta = {**(instance.meta or {}), **request_data.meta}
                     update_fields.append("meta")
 
                 touched = bool(update_fields)

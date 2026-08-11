@@ -41,8 +41,10 @@ SUCCESSFUL_OUTCOMES = (
 )
 
 
-def _mark_terminal_transaction(terminal_txn, new_status, new_outcome):
-    if new_outcome == PaymentReconciliationOutcomeOptions.partial:
+def _mark_terminal_transaction(
+    terminal_txn, new_status, new_outcome, is_partial_authorization=False
+):
+    if is_partial_authorization:
         terminal_txn.mark_partial()
     elif new_outcome == PaymentReconciliationOutcomeOptions.complete:
         terminal_txn.mark_completed()
@@ -153,6 +155,7 @@ def apply_status_to_reconciliation(
     transaction_data = _metainfo_to_dict(response.transaction_data)
 
     # Validate authorized amount matches requested amount (only for successful transactions)
+    is_partial_authorization = False
     if new_outcome == PaymentReconciliationOutcomeOptions.complete:
         authorized_amount_paise = transaction_data.get("Amount")
         if authorized_amount_paise:
@@ -190,7 +193,7 @@ def apply_status_to_reconciliation(
 
                     # Update the payment amount to match what was actually authorized
                     instance.amount = authorized_amount_rupees
-                    new_outcome = PaymentReconciliationOutcomeOptions.partial
+                    is_partial_authorization = True
 
             except (ValueError, TypeError) as e:
                 logger.warning(
@@ -215,7 +218,12 @@ def apply_status_to_reconciliation(
     with transaction.atomic():
         instance.save()
         if is_terminal_state and has_terminal_txn:
-            _mark_terminal_transaction(instance.terminal_transaction, new_status, new_outcome)
+            _mark_terminal_transaction(
+                instance.terminal_transaction,
+                new_status,
+                new_outcome,
+                is_partial_authorization,
+            )
 
     if new_outcome in SUCCESSFUL_OUTCOMES:
         rebalance_account_task(instance.account_id)

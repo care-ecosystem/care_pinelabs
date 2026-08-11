@@ -880,12 +880,14 @@ components:
 
     PinelabsConfigMeta:
       type: object
-      properties:
-        allow_manual_entry:
-          type: boolean
-          default: false
-          description: |
-            Whether we need to allow users to switch to manual entry (native payment flow)
+      description: |
+        Free-form key-value store for Pinelabs config UI preferences. Not a
+        fixed schema - any keys the client sends are accepted and stored
+        as-is (e.g. `allow_manual_entry` to let users switch to manual entry
+        for the native payment flow).
+      additionalProperties: true
+      example:
+        allow_manual_entry: true
 
     PinelabsConfigCreate:
       type: object
@@ -943,8 +945,8 @@ components:
           allOf:
             - $ref: '#/components/schemas/PinelabsConfigMeta'
           description: |
-            Only the keys present are updated (e.g. submitting
-            `{"allow_manual_entry": true}` leaves other meta keys, if any,
+            Merged into the stored meta object (e.g. submitting
+            `{"allow_manual_entry": true}` leaves other existing meta keys
             untouched). Omit `meta` entirely to leave it unchanged.
         pinelabs_security_token:
           type: string
