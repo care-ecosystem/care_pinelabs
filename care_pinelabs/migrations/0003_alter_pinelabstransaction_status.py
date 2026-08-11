@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('care_pinelabs', '0003_alter_pinelabstransaction_status'),
+        ('care_pinelabs', '0002_pinelabstransaction_and_more'),
     ]
 
     operations = [
