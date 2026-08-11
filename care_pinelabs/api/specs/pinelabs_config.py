@@ -161,6 +161,7 @@ class PinelabsConfigReadSpec(EMRResource):
     allow_advance_payment: bool
     allow_partial_payment: bool
     pinelabs_merchant_id: str
+    meta: dict | None = None
     payment_method_mappings: list[dict] = []
     created_by: dict | None = None
     updated_by: dict | None = None
@@ -179,11 +180,4 @@ class PinelabsConfigReadSpec(EMRResource):
         cls.serialize_audit_users(mapping, obj)
 
     def to_json(self):
-        data = self.model_dump(mode="json")
-        meta = data.pop("meta")
-        reordered = {}
-        for key, value in data.items():
-            reordered[key] = value
-            if key == "pinelabs_merchant_id":
-                reordered["meta"] = meta
-        return reordered
+        return self.model_dump(mode="json")
