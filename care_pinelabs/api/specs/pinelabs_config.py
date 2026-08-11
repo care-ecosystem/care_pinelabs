@@ -173,4 +173,15 @@ class PinelabsConfigReadSpec(EMRResource):
             PinelabsPaymentMethodMappingReadSpec.serialize(m).to_json()
             for m in obj.payment_method_mappings.all()
         ]
+        mapping["meta"] = {"allow_manual_entry": (obj.meta or {}).get("allow_manual_entry")}
         cls.serialize_audit_users(mapping, obj)
+
+    def to_json(self):
+        data = self.model_dump(mode="json")
+        meta = data.pop("meta")
+        reordered = {}
+        for key, value in data.items():
+            reordered[key] = value
+            if key == "pinelabs_merchant_id":
+                reordered["meta"] = meta
+        return reordered

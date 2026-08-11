@@ -35,6 +35,22 @@ PLUTUS_RESPONSE_CODE_UPLOADED = 1001
 
 PAISE_PER_RUPEE = 100
 
+SUCCESSFUL_OUTCOMES = (
+    PaymentReconciliationOutcomeOptions.complete,
+    PaymentReconciliationOutcomeOptions.partial,
+)
+
+
+def _mark_terminal_transaction(terminal_txn, new_status, new_outcome):
+    if new_outcome == PaymentReconciliationOutcomeOptions.partial:
+        terminal_txn.mark_partial()
+    elif new_outcome == PaymentReconciliationOutcomeOptions.complete:
+        terminal_txn.mark_completed()
+    elif new_status == PaymentReconciliationStatusOptions.cancelled:
+        terminal_txn.mark_cancelled()
+    else:
+        terminal_txn.mark_failed()
+
 
 def rupees_to_paise(amount: Decimal | int | float | None) -> int:
     if amount is None:
@@ -174,6 +190,7 @@ def apply_status_to_reconciliation(
 
                     # Update the payment amount to match what was actually authorized
                     instance.amount = authorized_amount_rupees
+                    new_outcome = PaymentReconciliationOutcomeOptions.partial
 
             except (ValueError, TypeError) as e:
                 logger.warning(
@@ -188,25 +205,19 @@ def apply_status_to_reconciliation(
         instance.reference_number = str(rrn)
     if approval_code := transaction_data.get("ApprovalCode"):
         instance.authorization = str(approval_code)
-    if new_outcome == PaymentReconciliationOutcomeOptions.complete:
+    if new_outcome in SUCCESSFUL_OUTCOMES:
         instance.payment_datetime = care_now()
 
-    instance.save()
-
-    # Mark terminal transaction as completed/cancelled if payment reached terminal state
+    # Mark terminal transaction as completed/cancelled/failed if payment reached a
+    # terminal state.
     is_terminal_state = new_outcome != PaymentReconciliationOutcomeOptions.queued
-    if is_terminal_state:
-        # Check if this payment has a linked terminal transaction
-        if hasattr(instance, "terminal_transaction") and instance.terminal_transaction:
-            terminal_txn = instance.terminal_transaction
-            if new_outcome == PaymentReconciliationOutcomeOptions.complete:
-                terminal_txn.mark_completed()
-            elif new_status == PaymentReconciliationStatusOptions.cancelled:
-                terminal_txn.mark_cancelled()
-            else:
-                terminal_txn.mark_failed()
+    has_terminal_txn = hasattr(instance, "terminal_transaction") and instance.terminal_transaction
+    with transaction.atomic():
+        instance.save()
+        if is_terminal_state and has_terminal_txn:
+            _mark_terminal_transaction(instance.terminal_transaction, new_status, new_outcome)
 
-    if new_outcome == PaymentReconciliationOutcomeOptions.complete:
+    if new_outcome in SUCCESSFUL_OUTCOMES:
         rebalance_account_task(instance.account_id)
 
     return is_terminal_state
@@ -346,13 +357,15 @@ def cancel_payment_reconciliation(
         raise ValidationError("Invalid reason")
     authorize_payment_reconciliation_cancel(instance, user)
     instance.status = status.value
+    instance.outcome = PaymentReconciliationOutcomeOptions.error.value
     instance.updated_by = user
     if meta:
         instance.meta = {**(instance.meta or {}), **meta}
-    instance.save()
 
-    if hasattr(instance, "terminal_transaction") and instance.terminal_transaction:
-        instance.terminal_transaction.mark_cancelled()
+    with transaction.atomic():
+        instance.save()
+        if hasattr(instance, "terminal_transaction") and instance.terminal_transaction:
+            instance.terminal_transaction.mark_cancelled()
 
     rebalance_account_task(instance.account_id)
     return instance
@@ -428,8 +441,12 @@ def refresh_payment_reconciliation_status(
     current_pinelabs_meta = (instance.meta or {}).get(PINELABS_META_KEY, {})
     current_status_meta = current_pinelabs_meta.get("status", {})
     current_response_code = current_status_meta.get("response_code")
+    current_response_message = current_status_meta.get("response_message")
 
-    status_changed = current_response_code != plutus_response.response_code
+    status_changed = (
+        current_response_code != plutus_response.response_code
+        or current_response_message != plutus_response.response_message
+    )
 
     # 6. Apply status to reconciliation only if changed
     if status_changed:
