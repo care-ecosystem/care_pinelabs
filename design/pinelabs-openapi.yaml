@@ -126,8 +126,7 @@ paths:
               allow_partial_payment: false
               pinelabs_merchant_id: "MERCH001"
               pinelabs_security_token: "super-secret-token"
-              meta:
-                allow_manual_entry: true
+              meta: 
               payment_method_mappings:
                 - care_method: "debc"
                   pinelabs_method: "1"
