@@ -2,10 +2,12 @@ import math
 
 from celery import shared_task
 from celery.utils.log import get_task_logger
+from django.db import transaction
 
 from care.emr.models.payment_reconciliation import PaymentReconciliation
 from care.emr.resources.payment_reconciliation.spec import (
     PaymentReconciliationOutcomeOptions,
+    PaymentReconciliationStatusOptions,
 )
 from care_pinelabs.models.pinelabs_pos_terminal import PinelabsPosTerminal
 from care_pinelabs.services.payment_reconciliation import (
@@ -123,8 +125,12 @@ def poll_pinelabs_transaction_status(
             payment_reconciliation_id,
             attempt,
         )
-        if hasattr(instance, "terminal_transaction") and instance.terminal_transaction:
-            instance.terminal_transaction.mark_timed_out()
+        instance.status = PaymentReconciliationStatusOptions.cancelled.value
+        instance.outcome = PaymentReconciliationOutcomeOptions.error.value
+        with transaction.atomic():
+            instance.save(update_fields=["status", "outcome", "modified_date"])
+            if hasattr(instance, "terminal_transaction") and instance.terminal_transaction:
+                instance.terminal_transaction.mark_timed_out()
         return
 
     poll_pinelabs_transaction_status.apply_async(

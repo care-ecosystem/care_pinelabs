@@ -6,9 +6,12 @@ from care_pinelabs.models.pinelabs_config import PinelabsConfig
 
 class PinelabsPaymentModeChoices(models.TextChoices):
     CARD = "1", "Card"
-    CASH = "2", "Cash"
+    # CASH = "2", "Cash"
+    PHONEPE = "8", "PhonePe"
     UPI_SALE = "10", "UPI Sale"
     UPI_BHARAT_QR = "11", "UPI Bharat QR"
+    AMAZON_PAY = "21", "Amazon Pay"
+
 
 
 class PinelabsPaymentMethodMapping(BaseModel):

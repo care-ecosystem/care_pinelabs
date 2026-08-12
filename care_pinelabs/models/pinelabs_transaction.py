@@ -12,9 +12,10 @@ class PinelabsTransactionStatus(models.TextChoices):
     STARTED = "started", "Started"  # Device blocked, calling Pine Labs
     IN_PROGRESS = "in_progress", "In Progress"  # Upload succeeded, waiting for customer
     COMPLETED = "completed", "Completed"  # Payment successful
-    CANCELLED = "cancelled", "Cancelled"  #Payment Cancelled 
+    CANCELLED = "cancelled", "Cancelled"  #Payment Cancelled
     TIMED_OUT = "timeout", "Timeout"      #API_Timeout or Auto Cancelled
     FAILED = "failed", "Failed"           #Fallback Failure
+    PARTIAL = "partial", "Partial"        # Gateway authorized a different amount than requested
 
 
 class PinelabsTransaction(BaseModel):
@@ -199,6 +200,11 @@ class PinelabsTransaction(BaseModel):
     def mark_failed(self):
         """Fallback status for terminal outcomes that aren't a success, cancellation, or timeout."""
         self.status = PinelabsTransactionStatus.FAILED
+        self.save(update_fields=["status", "modified_date"])
+
+    def mark_partial(self):
+        """Mark transaction as completed with a partial (mismatched) authorization amount."""
+        self.status = PinelabsTransactionStatus.PARTIAL
         self.save(update_fields=["status", "modified_date"])
 
     def is_active(self) -> bool:

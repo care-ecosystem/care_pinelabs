@@ -126,6 +126,7 @@ paths:
               allow_partial_payment: false
               pinelabs_merchant_id: "MERCH001"
               pinelabs_security_token: "super-secret-token"
+              meta: 
               payment_method_mappings:
                 - care_method: "debc"
                   pinelabs_method: "1"
@@ -876,6 +877,17 @@ components:
       enum: [pinelabs, native]
       nullable: true
 
+    PinelabsConfigMeta:
+      type: object
+      description: |
+        Free-form key-value store for Pinelabs config UI preferences. Not a
+        fixed schema - any keys the client sends are accepted and stored
+        as-is (e.g. `allow_manual_entry` to let users switch to manual entry
+        for the native payment flow).
+      additionalProperties: true
+      example:
+        allow_manual_entry: true
+
     PinelabsConfigCreate:
       type: object
       required:
@@ -899,6 +911,9 @@ components:
         pinelabs_merchant_id:
           type: string
           example: "MERCH001"
+        meta:
+          allOf:
+            - $ref: '#/components/schemas/PinelabsConfigMeta'
         pinelabs_security_token:
           type: string
           description: Stored encrypted at rest. Never returned by any read endpoint.
@@ -925,6 +940,13 @@ components:
           type: boolean
         pinelabs_merchant_id:
           type: string
+        meta:
+          allOf:
+            - $ref: '#/components/schemas/PinelabsConfigMeta'
+          description: |
+            Merged into the stored meta object (e.g. submitting
+            `{"allow_manual_entry": true}` leaves other existing meta keys
+            untouched). Omit `meta` entirely to leave it unchanged.
         pinelabs_security_token:
           type: string
           writeOnly: true
@@ -956,6 +978,7 @@ components:
         - allow_advance_payment
         - allow_partial_payment
         - pinelabs_merchant_id
+        - meta
         - payment_method_mappings
         - created_by
         - created_date
@@ -978,6 +1001,10 @@ components:
         pinelabs_merchant_id:
           type: string
           example: "MERCH001"
+        meta:
+          allOf:
+            - $ref: '#/components/schemas/PinelabsConfigMeta'
+          readOnly: true
         payment_method_mappings:
           type: array
           description: All active payment method mappings for this config

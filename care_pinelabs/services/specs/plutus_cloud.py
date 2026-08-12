@@ -5,8 +5,10 @@ from pydantic import BaseModel
 
 class AllowedPaymentMode(str, Enum):
     CARD = "1"
+    PHONEPE = "8"
     UPI = "10"
     BHARAT_QR = "11"
+    AMAZON_PAY = "21"
 
 
 class MetaInfo(BaseModel):

@@ -115,6 +115,7 @@ class PinelabsConfigViewSet(EMRBaseViewSet):
                 config.default_payment_flow = request_data.default_payment_flow
                 config.allow_advance_payment = request_data.allow_advance_payment
                 config.allow_partial_payment = request_data.allow_partial_payment
+                config.meta = {**(config.meta or {}), **request_data.meta}
                 config.pinelabs_merchant_id = request_data.pinelabs_merchant_id
                 config.pinelabs_security_token = request_data.pinelabs_security_token
                 config.created_by = request.user
@@ -158,6 +159,11 @@ class PinelabsConfigViewSet(EMRBaseViewSet):
                     if value is not None:
                         setattr(instance, field, value)
                         update_fields.append(field)
+
+                if request_data.meta is not None:
+                    instance.meta = {**(instance.meta or {}), **request_data.meta}
+                    update_fields.append("meta")
+
                 touched = bool(update_fields)
 
                 if request_data.payment_method_mappings is not None:
