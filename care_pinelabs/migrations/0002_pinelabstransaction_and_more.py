@@ -5,6 +5,51 @@ import uuid
 from django.db import migrations, models
 
 
+def check_table_exists(schema_editor):
+    """Check if the old table exists before trying to modify it."""
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute("""
+            SELECT EXISTS (
+                SELECT FROM information_schema.tables
+                WHERE table_schema = 'public'
+                AND table_name = 'pinelabs_terminal_transaction'
+            );
+        """)
+        return cursor.fetchone()[0]
+
+
+def remove_old_indexes_and_constraints(apps, schema_editor):
+    """Remove indexes and constraints from old table if it exists."""
+    if not check_table_exists(schema_editor):
+        return  # Skip if table doesn't exist (fresh deployment)
+
+    # Get the old model from state
+    PinelabsTerminalTransaction = apps.get_model('care_pinelabs', 'PinelabsTerminalTransaction')
+
+    # Drop indexes
+    with schema_editor.connection.cursor() as cursor:
+        indexes = [
+            'pinelabs_te_termina_dff131_idx',
+            'pinelabs_te_account_1df734_idx',
+            'pinelabs_te_invoice_bbc122_idx',
+            'pinelabs_te_status_dde0c4_idx',
+            'pinelabs_te_payment_221c40_idx',
+            'pinelabs_te_plutus__0df643_idx',
+        ]
+        for index_name in indexes:
+            cursor.execute(f"DROP INDEX IF EXISTS {index_name};")
+
+        # Drop constraints
+        constraints = [
+            'unique_active_transaction_per_terminal',
+            'unique_active_payment_per_invoice',
+            'unique_active_payment_per_account',
+            'unique_transaction_number',
+        ]
+        for constraint_name in constraints:
+            cursor.execute(f"ALTER TABLE pinelabs_terminal_transaction DROP CONSTRAINT IF EXISTS {constraint_name};")
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -30,45 +75,10 @@ class Migration(migrations.Migration):
                 'ordering': ['-created_date'],
             },
         ),
-        migrations.RemoveIndex(
-            model_name='pinelabsterminaltransaction',
-            name='pinelabs_te_termina_dff131_idx',
-        ),
-        migrations.RemoveIndex(
-            model_name='pinelabsterminaltransaction',
-            name='pinelabs_te_account_1df734_idx',
-        ),
-        migrations.RemoveIndex(
-            model_name='pinelabsterminaltransaction',
-            name='pinelabs_te_invoice_bbc122_idx',
-        ),
-        migrations.RemoveIndex(
-            model_name='pinelabsterminaltransaction',
-            name='pinelabs_te_status_dde0c4_idx',
-        ),
-        migrations.RemoveIndex(
-            model_name='pinelabsterminaltransaction',
-            name='pinelabs_te_payment_221c40_idx',
-        ),
-        migrations.RemoveIndex(
-            model_name='pinelabsterminaltransaction',
-            name='pinelabs_te_plutus__0df643_idx',
-        ),
-        migrations.RemoveConstraint(
-            model_name='pinelabsterminaltransaction',
-            name='unique_active_transaction_per_terminal',
-        ),
-        migrations.RemoveConstraint(
-            model_name='pinelabsterminaltransaction',
-            name='unique_active_payment_per_invoice',
-        ),
-        migrations.RemoveConstraint(
-            model_name='pinelabsterminaltransaction',
-            name='unique_active_payment_per_account',
-        ),
-        migrations.RemoveConstraint(
-            model_name='pinelabsterminaltransaction',
-            name='unique_transaction_number',
+        # Use RunPython to conditionally remove indexes and constraints
+        migrations.RunPython(
+            remove_old_indexes_and_constraints,
+            reverse_code=migrations.RunPython.noop,
         ),
         migrations.AddField(
             model_name='pinelabstransaction',
@@ -90,21 +100,47 @@ class Migration(migrations.Migration):
             name='terminal',
             field=models.ForeignKey(help_text='Terminal processing this transaction', on_delete=django.db.models.deletion.PROTECT, related_name='transactions', to='care_pinelabs.pinelabsposterminal'),
         ),
-        migrations.RemoveField(
-            model_name='pinelabsterminaltransaction',
-            name='account',
-        ),
-        migrations.RemoveField(
-            model_name='pinelabsterminaltransaction',
-            name='invoice',
-        ),
-        migrations.RemoveField(
-            model_name='pinelabsterminaltransaction',
-            name='payment_reconciliation',
-        ),
-        migrations.RemoveField(
-            model_name='pinelabsterminaltransaction',
-            name='terminal',
+        # Use SeparateDatabaseAndState to handle table removal only if it exists
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.RemoveField(
+                    model_name='pinelabsterminaltransaction',
+                    name='account',
+                ),
+                migrations.RemoveField(
+                    model_name='pinelabsterminaltransaction',
+                    name='invoice',
+                ),
+                migrations.RemoveField(
+                    model_name='pinelabsterminaltransaction',
+                    name='payment_reconciliation',
+                ),
+                migrations.RemoveField(
+                    model_name='pinelabsterminaltransaction',
+                    name='terminal',
+                ),
+            ],
+            database_operations=[
+                # These will only run if the table exists
+                migrations.RunSQL(
+                    sql="""
+                    DO $$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT FROM information_schema.tables
+                            WHERE table_schema = 'public'
+                            AND table_name = 'pinelabs_terminal_transaction'
+                        ) THEN
+                            ALTER TABLE pinelabs_terminal_transaction DROP COLUMN IF EXISTS account_id;
+                            ALTER TABLE pinelabs_terminal_transaction DROP COLUMN IF EXISTS invoice_id;
+                            ALTER TABLE pinelabs_terminal_transaction DROP COLUMN IF EXISTS payment_reconciliation_id;
+                            ALTER TABLE pinelabs_terminal_transaction DROP COLUMN IF EXISTS terminal_id;
+                        END IF;
+                    END $$;
+                    """,
+                    reverse_sql=migrations.RunSQL.noop,
+                ),
+            ],
         ),
         migrations.AddIndex(
             model_name='pinelabstransaction',
@@ -146,7 +182,18 @@ class Migration(migrations.Migration):
             model_name='pinelabstransaction',
             constraint=models.UniqueConstraint(fields=('transaction_number',), name='unique_transaction_number', violation_error_message='Transaction number already exists'),
         ),
-        migrations.DeleteModel(
-            name='PinelabsTerminalTransaction',
+        # Use SeparateDatabaseAndState to only drop table if it exists
+        migrations.SeparateDatabaseAndState(
+            state_operations=[
+                migrations.DeleteModel(
+                    name='PinelabsTerminalTransaction',
+                ),
+            ],
+            database_operations=[
+                migrations.RunSQL(
+                    sql="DROP TABLE IF EXISTS pinelabs_terminal_transaction CASCADE;",
+                    reverse_sql=migrations.RunSQL.noop,
+                ),
+            ],
         ),
     ]
