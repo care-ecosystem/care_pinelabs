@@ -5,26 +5,34 @@ import uuid
 from django.db import migrations, models
 
 
-def check_table_exists(schema_editor):
-    """Check if the old table exists before trying to modify it."""
+def check_table_exists(schema_editor, table_name):
+    """Check if a table exists before trying to modify it."""
     with schema_editor.connection.cursor() as cursor:
         cursor.execute("""
             SELECT EXISTS (
                 SELECT FROM information_schema.tables
                 WHERE table_schema = 'public'
-                AND table_name = 'pinelabs_terminal_transaction'
+                AND table_name = %s
             );
-        """)
+        """, [table_name])
         return cursor.fetchone()[0]
+
+
+def ensure_pos_terminal_table_exists(apps, schema_editor):
+    """Ensure PinelabsPosTerminal table exists before creating foreign keys to it."""
+    if check_table_exists(schema_editor, 'care_pinelabs_pinelabsposterminal'):
+        return  # Table already exists
+
+    # Table doesn't exist, create it from the model state
+    # This shouldn't normally happen, but protects against migration optimization issues
+    PinelabsPosTerminal = apps.get_model('care_pinelabs', 'PinelabsPosTerminal')
+    schema_editor.create_model(PinelabsPosTerminal)
 
 
 def remove_old_indexes_and_constraints(apps, schema_editor):
     """Remove indexes and constraints from old table if it exists."""
-    if not check_table_exists(schema_editor):
+    if not check_table_exists(schema_editor, 'pinelabs_terminal_transaction'):
         return  # Skip if table doesn't exist (fresh deployment)
-
-    # Get the old model from state
-    PinelabsTerminalTransaction = apps.get_model('care_pinelabs', 'PinelabsTerminalTransaction')
 
     # Drop indexes
     with schema_editor.connection.cursor() as cursor:
@@ -58,6 +66,11 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        # Ensure PinelabsPosTerminal table exists before creating FK to it
+        migrations.RunPython(
+            ensure_pos_terminal_table_exists,
+            reverse_code=migrations.RunPython.noop,
+        ),
         migrations.CreateModel(
             name='PinelabsTransaction',
             fields=[
