@@ -97,9 +97,7 @@ class PluginSettings:  # pragma: no cover
             delattr(self, "_user_settings")
 
 
-REQUIRED_SETTINGS = {
-    "PINELABS_SECRET_KEY",
-}
+REQUIRED_SETTINGS = set()
 
 DEFAULTS = {
     "PINELABS_SECRET_KEY": "",
