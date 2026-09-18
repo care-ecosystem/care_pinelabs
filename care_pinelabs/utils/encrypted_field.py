@@ -2,21 +2,14 @@ import base64
 import hashlib
 
 from cryptography.fernet import Fernet, InvalidToken
-from django.core.exceptions import ImproperlyConfigured
 from django.db import models
 
 from care_pinelabs.settings import plugin_settings
 
 
 def _get_fernet() -> Fernet:
-    secret_key = plugin_settings.PINELABS_SECRET_KEY
-    if not secret_key:
-        raise ImproperlyConfigured(
-            "PINELABS_SECRET_KEY is not configured. "
-            "Please set it in the environment or plugin config to use Pinelabs features."
-        )
     key = base64.urlsafe_b64encode(
-        hashlib.sha256(secret_key.encode()).digest()
+        hashlib.sha256(plugin_settings.PINELABS_SECRET_KEY.encode()).digest()
     )
     return Fernet(key)
 
