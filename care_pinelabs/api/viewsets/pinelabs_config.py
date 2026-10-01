@@ -1,5 +1,6 @@
 from django.db import IntegrityError, transaction
 from drf_spectacular.utils import extend_schema
+from pydantic import RootModel
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -29,7 +30,8 @@ class _ConflictError(Exception):
     pass
 
 
-PinelabsPosTerminalReadSpecList = list[PinelabsPosTerminalReadSpec]
+class PinelabsPosTerminalReadSpecList(RootModel[list[PinelabsPosTerminalReadSpec]]):
+    pass
 
 
 @extend_schema(tags=["Pinelabs: Pinelabs Config"])
